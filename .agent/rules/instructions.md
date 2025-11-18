@@ -1,3 +1,7 @@
+---
+trigger: always_on
+---
+
 # AGENTS.md
 ## Guidance for AI Agents on LiMount
 
