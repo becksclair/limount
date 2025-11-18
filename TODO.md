@@ -205,6 +205,10 @@
   - PowerShell script documentation
 - [x] Clean up code comments
 - [x] Update .gitignore for temp files
+- [x] Fix CA1416 platform compatibility warnings
+  - Changed LiMount.Core target framework to net8.0-windows
+  - Added [SupportedOSPlatform("windows")] attributes to services
+  - Updated documentation to reflect Windows-only targeting
 - [ ] Final build and verification (requires Windows with .NET 8 SDK)
 
 ---
