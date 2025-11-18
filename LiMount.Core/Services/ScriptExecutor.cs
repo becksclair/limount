@@ -119,7 +119,7 @@ public class ScriptExecutor : IScriptExecutor
 
         var arguments = $"-ExecutionPolicy Bypass -File \"{scriptPath}\" -DiskIndex {diskIndex}";
 
-        var output = await ExecuteElevatedScriptAsync("powershell.exe", arguments, diskIndex, 0);
+        var output = await ExecuteElevatedScriptAsync("powershell.exe", arguments, diskIndex, 0, isUnmountOperation: true);
         var parsedValues = KeyValueOutputParser.Parse(output);
         return UnmountResult.FromDictionary(parsedValues);
     }
@@ -146,7 +146,14 @@ public class ScriptExecutor : IScriptExecutor
 
         var (output, error) = await ExecuteNonElevatedScriptAsync("powershell.exe", arguments);
         var parsedValues = KeyValueOutputParser.Parse(output);
-        return UnmappingResult.FromDictionary(parsedValues);
+        var result = UnmappingResult.FromDictionary(parsedValues);
+
+        if (!result.Success && !string.IsNullOrEmpty(error) && string.IsNullOrEmpty(result.ErrorMessage))
+        {
+            result.ErrorMessage = error;
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -154,12 +161,14 @@ public class ScriptExecutor : IScriptExecutor
     /// </summary>
     /// <param name="diskIndex">Disk index used to construct the temporary output filename.</param>
     /// <param name="partition">Partition number used to construct the temporary output filename.</param>
+    /// <param name="isUnmountOperation">Whether this is an unmount operation (uses different filename pattern).</param>
     /// <returns>The contents of the temporary output file when successful; otherwise a string beginning with "STATUS=ERROR" and an error message.</returns>
     private async Task<string> ExecuteElevatedScriptAsync(
         string fileName,
         string arguments,
         int diskIndex,
-        int partition)
+        int partition,
+        bool isUnmountOperation = false)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -182,9 +191,9 @@ public class ScriptExecutor : IScriptExecutor
             await process.WaitForExitAsync();
 
             // Read output from temp file (script writes there for elevated scenarios)
-            var tempOutputFile = Path.Combine(
-                Path.GetTempPath(),
-                $"limount_mount_{diskIndex}_{partition}.txt");
+            var tempOutputFile = isUnmountOperation 
+                ? Path.Combine(Path.GetTempPath(), $"limount_unmount_{diskIndex}.txt")
+                : Path.Combine(Path.GetTempPath(), $"limount_mount_{diskIndex}_{partition}.txt");
 
             // Wait for file to be written
             for (int i = 0; i < 10; i++)

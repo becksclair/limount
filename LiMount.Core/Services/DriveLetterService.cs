@@ -14,9 +14,7 @@ public class DriveLetterService : IDriveLetterService
     /// <summary>
     /// Gets all drive letters currently in use on the system.
     /// Uses DriveInfo.GetDrives() and also checks for network/subst drives.
-    /// </summary>
-    /// <summary>
-    /// Retrieves the drive letters currently in use on the system (A–Z), returned in ascending order.
+    /// Retrieves the drive letters currently in use on the system (A-Z), returned in ascending order.
     /// </summary>
     /// <returns>A read-only list of uppercase drive letters that are currently in use (sorted A→Z). If drive enumeration fails, returns any letters that were successfully collected.</returns>
     public IReadOnlyList<char> GetUsedLetters()
@@ -50,8 +48,6 @@ public class DriveLetterService : IDriveLetterService
     /// <summary>
     /// Gets all available (free) drive letters.
     /// Returns letters A-Z that are not in use, sorted Z→A (preferred order).
-    /// </summary>
-    /// <summary>
     /// Gets the available drive letters (A–Z) that are not currently in use.
     /// </summary>
     /// <returns>A read-only list of uppercase drive letters not in use, sorted from 'Z' to 'A'.</returns>
@@ -67,12 +63,9 @@ public class DriveLetterService : IDriveLetterService
 
     /// <summary>
     /// Checks if a specific drive letter is available (not in use).
-    /// </summary>
-    /// <param name="letter">Drive letter to check (case-insensitive)</param>
-    /// <summary>
     /// Determines whether the specified drive letter is available for use.
     /// </summary>
-    /// <param name="letter">The drive letter to check (case-insensitive).</param>
+    /// <param name="letter">Drive letter to check (case-insensitive).</param>
     /// <returns>`true` if the letter is available (a letter A–Z and not currently in use), `false` otherwise.</returns>
     public bool IsLetterAvailable(char letter)
     {

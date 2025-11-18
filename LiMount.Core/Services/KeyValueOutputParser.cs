@@ -10,9 +10,6 @@ public static class KeyValueOutputParser
     /// Parses lines of "key=value" format into a dictionary.
     /// Lines that don't match the pattern are ignored.
     /// Keys and values are trimmed of whitespace.
-    /// </summary>
-    /// <param name="output">Multi-line output from PowerShell script</param>
-    /// <summary>
     /// Parses a multiline key=value string (one pair per line) into a case-insensitive dictionary.
     /// </summary>
     /// <param name="output">Multiline text containing key=value lines; lines without a leading key or without '=' are ignored.</param>
@@ -59,7 +56,6 @@ public static class KeyValueOutputParser
 
     /// <summary>
     /// Checks if the parsed output indicates success (STATUS=OK).
-    /// <summary>
     /// Determine whether the parsed key/value output indicates success.
     /// </summary>
     /// <param name="values">Parsed key/value pairs; the method checks the "STATUS" entry if present.</param>
@@ -72,7 +68,6 @@ public static class KeyValueOutputParser
 
     /// <summary>
     /// Gets the error message from parsed output, if any.
-    /// <summary>
     /// Retrieves the value associated with the "ErrorMessage" key from the provided key/value pairs.
     /// </summary>
     /// <param name="values">A dictionary of key/value pairs to search for the error message.</param>

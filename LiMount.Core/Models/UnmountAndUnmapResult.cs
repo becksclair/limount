@@ -36,9 +36,7 @@ public class UnmountAndUnmapResult
     public DateTime Timestamp { get; set; } = DateTime.Now;
 
     /// <summary>
-    /// Creates a successful result.
-    /// <summary>
-    /// Creates a successful UnmountAndUnmapResult for the specified disk and optional drive letter.
+    /// Creates a successful result for the specified disk and optional drive letter.
     /// </summary>
     /// <param name="diskIndex">Index of the disk that was successfully unmounted and unmapped.</param>
     /// <param name="driveLetter">Optional drive letter that was unmapped; null if none.</param>
@@ -55,8 +53,6 @@ public class UnmountAndUnmapResult
         };
     }
 
-    /// <summary>
-    /// Creates a failure result.
     /// <summary>
     /// Creates a result representing a failed unmount-and-unmap operation for the specified disk.
     /// </summary>

@@ -15,14 +15,13 @@ public interface IScriptExecutor
     /// <param name="partition">Partition number (1-based)</param>
     /// <param name="fsType">Filesystem type (ext4, xfs, etc.)</param>
     /// <param name="distroName">Optional WSL distribution name</param>
-    /// <summary>
-        /// Executes the PowerShell script to mount a Linux partition on the specified physical disk.
-        /// </summary>
-        /// <param name="diskIndex">Index of the physical disk to mount.</param>
-        /// <param name="partition">Partition number on the disk (1-based).</param>
-        /// <param name="fsType">Filesystem type to mount (for example, "ext4" or "xfs").</param>
-        /// <param name="distroName">Optional WSL distribution name to target; null to mount without a specific distribution.</param>
-        /// <returns>A MountResult containing details and status of the mount operation.</returns>
+    /// Executes the PowerShell script to mount a Linux partition on the specified physical disk.
+    /// </summary>
+    /// <param name="diskIndex">Index of the physical disk to mount.</param>
+    /// <param name="partition">Partition number on the disk (1-based).</param>
+    /// <param name="fsType">Filesystem type to mount (for example, "ext4" or "xfs").</param>
+    /// <param name="distroName">Optional WSL distribution name to target; null to mount without a specific distribution.</param>
+    /// <returns>A MountResult containing details and status of the mount operation.</returns>
     Task<MountResult> ExecuteMountScriptAsync(
         int diskIndex,
         int partition,

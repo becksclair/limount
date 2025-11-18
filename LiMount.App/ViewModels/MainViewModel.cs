@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -20,7 +21,7 @@ public partial class MainViewModel : ObservableObject
 {
     private readonly IDiskEnumerationService _diskService;
     private readonly IDriveLetterService _driveLetterService;
-    private readonly IScriptExecutor _scriptExecutor;
+    private readonly IMountOrchestrator _mountOrchestrator;
 
     [ObservableProperty]
     private ObservableCollection<DiskInfo> _disks = new();
@@ -59,14 +60,16 @@ public partial class MainViewModel : ObservableObject
     /// </summary>
     /// <param name="diskService">Service used to enumerate candidate disks and their partitions.</param>
     /// <param name="driveLetterService">Service used to obtain available drive letters.</param>
-    /// <param name="scriptExecutor">Service used to execute mounting and mapping scripts.</param>
-    public MainViewModel(IDiskEnumerationService diskService, IDriveLetterService driveLetterService, IScriptExecutor scriptExecutor)
+    /// <param name="mountOrchestrator">Service used to orchestrate mounting and mapping operations.</param>
+    public MainViewModel(
+        IDiskEnumerationService diskService, 
+        IDriveLetterService driveLetterService,
+        IMountOrchestrator mountOrchestrator)
     {
         _diskService = diskService;
         _driveLetterService = driveLetterService;
-        _scriptExecutor = scriptExecutor;
-
-        // Subscribe to SelectedDisk changes to update partitions
+        _mountOrchestrator = mountOrchestrator;
+        
         PropertyChanged += OnPropertyChanged;
     }
 
@@ -85,7 +88,6 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>
     /// Loads disks and drive letters from the system.
-    /// <summary>
     /// Refreshes the available disks, partitions, and free drive letters.
     /// </summary>
     [RelayCommand]
@@ -97,12 +99,21 @@ public partial class MainViewModel : ObservableObject
     /// <summary>
     /// Initializes the ViewModel by loading disks and drive letters asynchronously.
     /// Call this after instantiation to perform heavy I/O operations.
-    /// <summary>
-    /// Loads available disks and free drive letters in the background.
     /// </summary>
     public async Task InitializeAsync()
     {
-        await Task.Run(() => LoadDisksAndDriveLetters());
+        try
+        {
+            // Run data retrieval on background thread
+            var data = await Task.Run(GetDisksAndDriveLettersData);
+            
+            // Update UI on UI thread
+            await Application.Current.Dispatcher.InvokeAsync(() => UpdateUIWithData(data));
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Error loading disks: {ex.Message}";
+        }
     }
 
     /// <summary>
@@ -116,42 +127,68 @@ public partial class MainViewModel : ObservableObject
         try
         {
             StatusMessage = "Loading disks and drive letters...";
-
-            // Get candidate disks (non-system, non-boot)
-            var candidateDisks = _diskService.GetCandidateDisks();
-
-            Disks.Clear();
-            foreach (var disk in candidateDisks)
-            {
-                Disks.Add(disk);
-            }
-
-            // Get free drive letters (sorted Z→A)
-            var freeLetters = _driveLetterService.GetFreeLetters();
-
-            FreeDriveLetters.Clear();
-            foreach (var letter in freeLetters)
-            {
-                FreeDriveLetters.Add(letter);
-            }
-
-            // Auto-select first disk and drive letter if available
-            if (Disks.Count > 0 && SelectedDisk == null)
-            {
-                SelectedDisk = Disks[0];
-            }
-
-            if (FreeDriveLetters.Count > 0 && SelectedDriveLetter == null)
-            {
-                SelectedDriveLetter = FreeDriveLetters[0];
-            }
-
-            StatusMessage = $"Found {Disks.Count} candidate disk(s) and {FreeDriveLetters.Count} free drive letter(s).";
+            
+            // Get data synchronously on UI thread
+            var data = GetDisksAndDriveLettersData();
+            
+            // Update UI on UI thread
+            UpdateUIWithData(data);
         }
         catch (Exception ex)
         {
             StatusMessage = $"Error loading disks: {ex.Message}";
         }
+    }
+
+    /// <summary>
+    /// Retrieves disks and drive letters data without touching UI components.
+    /// This method is safe to call from any thread.
+    /// </summary>
+    /// <returns>Tuple containing candidate disks and free drive letters</returns>
+    private (IEnumerable<DiskInfo> candidateDisks, IEnumerable<DriveLetterInfo> freeLetters) GetDisksAndDriveLettersData()
+    {
+        // Get candidate disks (non-system, non-boot)
+        var candidateDisks = _diskService.GetCandidateDisks();
+
+        // Get free drive letters (sorted Z→A) and convert to DriveLetterInfo objects
+        var freeLetters = _driveLetterService.GetFreeLetters()
+            .Select(letter => new DriveLetterInfo { Letter = letter, IsInUse = false });
+        
+        return (candidateDisks, freeLetters);
+    }
+
+    /// <summary>
+    /// Updates UI collections and properties with the provided data.
+    /// This method must be called on the UI thread.
+    /// </summary>
+    private void UpdateUIWithData((IEnumerable<DiskInfo> candidateDisks, IEnumerable<DriveLetterInfo> freeLetters) data)
+    {
+        var (candidateDisks, freeLetters) = data;
+        
+        Disks.Clear();
+        foreach (var disk in candidateDisks)
+        {
+            Disks.Add(disk);
+        }
+
+        FreeDriveLetters.Clear();
+        foreach (var letter in freeLetters)
+        {
+            FreeDriveLetters.Add(letter.Letter);
+        }
+
+        // Auto-select first disk and drive letter if available
+        if (Disks.Count > 0 && SelectedDisk == null)
+        {
+            SelectedDisk = Disks[0];
+        }
+
+        if (FreeDriveLetters.Count > 0 && SelectedDriveLetter == null)
+        {
+            SelectedDriveLetter = FreeDriveLetters[0];
+        }
+
+        StatusMessage = $"Found {Disks.Count} candidate disk(s) and {FreeDriveLetters.Count} free drive letter(s).";
     }
 
     /// <summary>
@@ -193,7 +230,6 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>
     /// Mounts the selected disk partition into WSL2 and maps it to a Windows drive letter.
-    /// <summary>
     /// Mounts the selected partition into WSL using an elevated PowerShell script, maps the resulting UNC path to the chosen Windows drive letter, and updates the view model's status, busy state, and explorer availability based on the outcome.
     /// </summary>
     [RelayCommand(CanExecute = nameof(CanMount))]
@@ -210,32 +246,19 @@ public partial class MainViewModel : ObservableObject
 
         try
         {
-            // Step 1: Mount disk in WSL using elevated PowerShell script
-            StatusMessage = $"Mounting disk {SelectedDisk.Index} partition {SelectedPartition.PartitionNumber} in WSL...";
-
-            var mountResult = await ExecuteMountScriptAsync(
+            var progress = new Progress<string>(msg => StatusMessage = msg);
+            
+            var result = await _mountOrchestrator.MountAndMapAsync(
                 SelectedDisk.Index,
                 SelectedPartition.PartitionNumber,
-                SelectedFsType);
-
-            if (!mountResult.Success)
-            {
-                StatusMessage = $"Mount failed: {mountResult.ErrorMessage}";
-                return;
-            }
-
-            StatusMessage = $"Mounted successfully. WSL path: {mountResult.MountPathLinux}";
-
-            // Step 2: Map WSL UNC path to drive letter
-            StatusMessage = $"Mapping {mountResult.MountPathUNC} to {SelectedDriveLetter}:...";
-
-            var mappingResult = await _scriptExecutor.ExecuteMappingScriptAsync(
                 SelectedDriveLetter.Value,
-                mountResult.MountPathUNC!);
-
-            if (!mappingResult.Success)
+                SelectedFsType,
+                null,
+                progress);
+            
+            if (!result.Success)
             {
-                StatusMessage = $"Mapping failed: {mappingResult.ErrorMessage}";
+                StatusMessage = result.ErrorMessage ?? "Mount and map operation failed.";
                 return;
             }
 
@@ -269,7 +292,6 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>
     /// Opens Windows Explorer to the mapped drive letter.
-    /// <summary>
     /// Opens Windows Explorer at the last mapped drive letter, if a drive has been mapped.
     /// </summary>
     /// <remarks>
@@ -303,137 +325,4 @@ public partial class MainViewModel : ObservableObject
         return CanOpenExplorer && !string.IsNullOrEmpty(_lastMappedDriveLetter);
     }
 
-    /// <summary>
-    /// Executes the Mount-LinuxDiskCore.ps1 script with elevation.
-    /// <summary>
-    /// Executes the elevated PowerShell mount script for the specified physical disk and partition using the given filesystem type.
-    /// </summary>
-    /// <param name="diskIndex">The physical disk index to mount (as reported by the system).</param>
-    /// <param name="partition">The partition number on the disk to mount.</param>
-    /// <param name="fsType">The filesystem type to use when mounting (e.g., "ext4").</param>
-    /// <returns>A <see cref="MountResult"/> describing success or failure and any associated message.</returns>
-    private async Task<MountResult> ExecuteMountScriptAsync(int diskIndex, int partition, string fsType)
-    {
-        var scriptPath = GetScriptPath("Mount-LinuxDiskCore.ps1");
-
-        if (!File.Exists(scriptPath))
-        {
-            return new MountResult
-            {
-                Success = false,
-                ErrorMessage = $"Mount script not found at: {scriptPath}"
-            };
-        }
-
-        var arguments = $"-ExecutionPolicy Bypass -File \"{scriptPath}\" " +
-                       $"-DiskIndex {diskIndex} " +
-                       $"-Partition {partition} " +
-                       $"-FsType {fsType}";
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "powershell.exe",
-            Arguments = arguments,
-            Verb = "runas", // Request elevation
-            UseShellExecute = true, // Required for elevation
-            CreateNoWindow = false,
-            WindowStyle = ProcessWindowStyle.Hidden
-        };
-
-        try
-        {
-            using var process = Process.Start(startInfo);
-            if (process == null)
-            {
-                return new MountResult
-                {
-                    Success = false,
-                    ErrorMessage = "Failed to start PowerShell process."
-                };
-            }
-
-            await process.WaitForExitAsync();
-
-            // Note: When using runas with UseShellExecute = true, we cannot capture stdout directly.
-            // We need to modify our approach: write output to a temp file from the script,
-            // or use a different elevation method.
-            // For MVP, we'll use a temp file approach.
-
-            // Read output from temp file (script should write to a known location)
-            var tempOutputFile = Path.Combine(Path.GetTempPath(), $"limount_mount_{diskIndex}_{partition}.txt");
-
-            // Wait a moment for file to be written
-            await Task.Delay(500);
-
-            if (File.Exists(tempOutputFile))
-            {
-                var output = await File.ReadAllTextAsync(tempOutputFile);
-                File.Delete(tempOutputFile);
-
-                var parsedValues = KeyValueOutputParser.Parse(output);
-                return MountResult.FromDictionary(parsedValues);
-            }
-
-            // Fallback: assume success if exit code is 0
-            if (process.ExitCode == 0)
-            {
-                return new MountResult
-                {
-                    Success = true,
-                    ErrorMessage = "Mount script completed but output file not found. Assuming success."
-                };
-            }
-
-            return new MountResult
-            {
-                Success = false,
-                ErrorMessage = $"Mount script exited with code {process.ExitCode}"
-            };
-        }
-        catch (Exception ex)
-        {
-            return new MountResult
-            {
-                Success = false,
-                ErrorMessage = $"Failed to execute mount script: {ex.Message}"
-            };
-        }
     }
-
-    
-    /// <summary>
-    /// Locate a script file by searching several likely "scripts" directories relative to the application's base directory.
-    /// </summary>
-    /// <param name="scriptFileName">The file name of the script to locate (e.g., "Mount-LinuxDiskCore.ps1").</param>
-    /// <returns>The full path to the first matching script file found; if none are found, returns a fallback path under the application's "scripts" folder.</returns>
-    private string GetScriptPath(string scriptFileName)
-    {
-        // Try to locate the script relative to the application directory
-        var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
-
-        // Look for scripts folder in several locations:
-        // 1. <AppDirectory>/scripts
-        // 2. <AppDirectory>/../../../scripts (for development builds)
-        // 3. <AppDirectory>/../../../../scripts (for deeper nested builds)
-
-        var possiblePaths = new[]
-        {
-            Path.Combine(appDirectory, "scripts", scriptFileName),
-            Path.Combine(appDirectory, "..", "..", "..", "scripts", scriptFileName),
-            Path.Combine(appDirectory, "..", "..", "..", "..", "scripts", scriptFileName),
-            Path.Combine(appDirectory, "..", "..", "..", "..", "..", "scripts", scriptFileName)
-        };
-
-        foreach (var path in possiblePaths)
-        {
-            var fullPath = Path.GetFullPath(path);
-            if (File.Exists(fullPath))
-            {
-                return fullPath;
-            }
-        }
-
-        // Fallback: assume scripts are in the repo root
-        return Path.Combine(appDirectory, "scripts", scriptFileName);
-    }
-}
