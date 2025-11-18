@@ -1,0 +1,181 @@
+<Window x:Class="LiMount.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="LiMount - WSL Disk Mounter"
+        Height="600" Width="700"
+        MinHeight="500" MinWidth="650"
+        Background="{StaticResource BackgroundBrush}"
+        WindowStartupLocation="CenterScreen">
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <!-- Header/Instructions -->
+            <RowDefinition Height="Auto"/>
+            <!-- Main Content -->
+            <RowDefinition Height="*"/>
+            <!-- Status/Log -->
+            <RowDefinition Height="Auto"/>
+            <!-- Buttons -->
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header Section -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,20">
+            <TextBlock Text="LiMount"
+                       FontSize="24"
+                       FontWeight="SemiBold"
+                       Foreground="{StaticResource TextPrimaryBrush}"
+                       Margin="0,0,0,8"/>
+            <TextBlock Text="Mount Linux disk partitions into WSL2 and map them as Windows drive letters"
+                       FontSize="13"
+                       Foreground="{StaticResource TextSecondaryBrush}"
+                       TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <!-- Main Content Section -->
+        <Border Grid.Row="1"
+                Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1"
+                CornerRadius="4"
+                Padding="20">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <!-- Disk Selection -->
+                    <TextBlock Text="Select Disk"
+                               FontSize="14"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource TextPrimaryBrush}"
+                               Margin="0,0,0,8"/>
+                    <ComboBox x:Name="DiskComboBox"
+                              Style="{StaticResource ModernComboBox}"
+                              ItemsSource="{Binding Disks}"
+                              SelectedItem="{Binding SelectedDisk, Mode=TwoWay}"
+                              DisplayMemberPath="DisplayName"
+                              Margin="0,0,0,20"
+                              IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBooleanConverter}}"/>
+
+                    <!-- Partition Selection -->
+                    <TextBlock Text="Select Partition"
+                               FontSize="14"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource TextPrimaryBrush}"
+                               Margin="0,0,0,8"/>
+                    <ComboBox x:Name="PartitionComboBox"
+                              Style="{StaticResource ModernComboBox}"
+                              ItemsSource="{Binding Partitions}"
+                              SelectedItem="{Binding SelectedPartition, Mode=TwoWay}"
+                              DisplayMemberPath="DisplayName"
+                              Margin="0,0,0,20"
+                              IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBooleanConverter}}"/>
+
+                    <!-- Drive Letter Selection -->
+                    <TextBlock Text="Select Drive Letter"
+                               FontSize="14"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource TextPrimaryBrush}"
+                               Margin="0,0,0,8"/>
+                    <ComboBox x:Name="DriveLetterComboBox"
+                              Style="{StaticResource ModernComboBox}"
+                              ItemsSource="{Binding FreeDriveLetters}"
+                              SelectedItem="{Binding SelectedDriveLetter, Mode=TwoWay}"
+                              Margin="0,0,0,20"
+                              IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBooleanConverter}}">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding StringFormat={}{0}:}"/>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+
+                    <!-- Filesystem Type Selection -->
+                    <TextBlock Text="Filesystem Type"
+                               FontSize="14"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource TextPrimaryBrush}"
+                               Margin="0,0,0,8"/>
+                    <ComboBox x:Name="FsTypeComboBox"
+                              Style="{StaticResource ModernComboBox}"
+                              SelectedItem="{Binding SelectedFsType, Mode=TwoWay}"
+                              Margin="0,0,0,20"
+                              IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBooleanConverter}}">
+                        <ComboBoxItem Content="ext4" IsSelected="True"/>
+                        <ComboBoxItem Content="xfs"/>
+                        <ComboBoxItem Content="btrfs"/>
+                        <ComboBoxItem Content="vfat"/>
+                    </ComboBox>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Status Section -->
+        <Border Grid.Row="2"
+                Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1"
+                CornerRadius="4"
+                Padding="12"
+                Margin="0,12,0,12">
+            <StackPanel>
+                <TextBlock Text="Status"
+                           FontSize="12"
+                           FontWeight="SemiBold"
+                           Foreground="{StaticResource TextSecondaryBrush}"
+                           Margin="0,0,0,6"/>
+                <TextBlock x:Name="StatusTextBlock"
+                           Text="{Binding StatusMessage}"
+                           FontSize="13"
+                           Foreground="{StaticResource TextPrimaryBrush}"
+                           TextWrapping="Wrap"
+                           MinHeight="20"/>
+
+                <!-- Optional: Progress indicator -->
+                <ProgressBar x:Name="ProgressBar"
+                             IsIndeterminate="True"
+                             Height="4"
+                             Margin="0,8,0,0"
+                             Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Buttons Section -->
+        <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Refresh Button -->
+            <Button Grid.Column="0"
+                    Content="Refresh"
+                    Style="{StaticResource SecondaryButton}"
+                    Command="{Binding RefreshCommand}"
+                    Width="100"
+                    Margin="0,0,8,0"/>
+
+            <!-- Spacer -->
+
+            <!-- Open in Explorer Button -->
+            <Button Grid.Column="2"
+                    x:Name="OpenExplorerButton"
+                    Content="Open in Explorer"
+                    Style="{StaticResource SecondaryButton}"
+                    Command="{Binding OpenExplorerCommand}"
+                    Width="130"
+                    Margin="0,0,8,0"
+                    Visibility="{Binding CanOpenExplorer, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+
+            <!-- Mount Button -->
+            <Button Grid.Column="3"
+                    Content="Mount"
+                    Style="{StaticResource ModernButton}"
+                    Command="{Binding MountCommand}"
+                    Width="120"/>
+        </Grid>
+    </Grid>
+</Window>
