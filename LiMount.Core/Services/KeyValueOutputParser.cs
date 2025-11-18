@@ -10,7 +10,6 @@ public static class KeyValueOutputParser
     /// Parses lines of "key=value" format into a dictionary.
     /// Lines that don't match the pattern are ignored.
     /// Keys and values are trimmed of whitespace.
-    /// Parses a multiline key=value string (one pair per line) into a case-insensitive dictionary.
     /// </summary>
     /// <param name="output">Multiline text containing key=value lines; lines without a leading key or without '=' are ignored.</param>
     /// <returns>A dictionary mapping keys to their trimmed values with case-insensitive keys; returns an empty dictionary if <paramref name="output"/> is null or whitespace.</returns>
@@ -56,7 +55,6 @@ public static class KeyValueOutputParser
 
     /// <summary>
     /// Checks if the parsed output indicates success (STATUS=OK).
-    /// Determine whether the parsed key/value output indicates success.
     /// </summary>
     /// <param name="values">Parsed key/value pairs; the method checks the "STATUS" entry if present.</param>
     /// <returns>`true` if the "STATUS" value equals "OK" (case-insensitive), `false` otherwise.</returns>

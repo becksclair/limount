@@ -5,6 +5,7 @@ namespace LiMount.Core.Models;
 /// </summary>
 public class PartitionInfo
 {
+    private static readonly string[] Sizes = { "B", "KB", "MB", "GB", "TB" };
     /// <summary>
     /// Partition number (1-based index).
     /// </summary>
@@ -13,7 +14,17 @@ public class PartitionInfo
     /// <summary>
     /// Size of the partition in bytes.
     /// </summary>
-    public long SizeBytes { get; set; }
+    public long SizeBytes
+    {
+        get => _sizeBytes;
+        set
+        {
+            if (value < 0)
+                throw new ArgumentOutOfRangeException(nameof(value), "SizeBytes cannot be negative.");
+            _sizeBytes = value;
+        }
+    }
+    private long _sizeBytes;
 
     /// <summary>
     /// Partition label/name (if available).
@@ -54,18 +65,17 @@ public class PartitionInfo
     /// <summary>
     /// Converts a byte count into a concise, human-readable string using binary units (base 1024).
     /// </summary>
-    /// <param name="bytes">The size in bytes to format; may be zero or negative.</param>
+    /// <param name="bytes">The size in bytes to format.</param>
     /// <returns>A formatted string with up to two decimal places and a unit suffix: one of "B", "KB", "MB", "GB", or "TB".</returns>
     private static string FormatBytes(long bytes)
     {
-        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
         double len = bytes;
         int order = 0;
-        while (len >= 1024 && order < sizes.Length - 1)
+        while (len >= 1024 && order < Sizes.Length - 1)
         {
             order++;
             len = len / 1024;
         }
-        return $"{len:0.##} {sizes[order]}";
+        return $"{len:0.##} {Sizes[order]}";
     }
 }

@@ -28,15 +28,19 @@ public class UnmountOrchestrator : IUnmountOrchestrator
     /// <param name="diskIndex">Index of the disk to unmount from WSL.</param>
     /// <param name="driveLetter">Optional drive letter to unmap before unmounting; pass null to skip unmapping.</param>
     /// <param name="progress">Optional progress reporter that receives status messages.</param>
-    /// <returns>An UnmountAndUnmapResult indicating success (including disk index and optional drive letter) or failure (including disk index, an error message, and the failed operation identifier).</returns>
+    /// <returns>An UnmountAndUnmapResult indicating success (including disk index and optional drive letter) or failure (including disk index, an error message, and the failed operation identifier). The returned drive letter (if any) is the same one passed as input and may be present even if the unmapping operation failed. Callers should inspect the operation result/failure details to determine whether unmapping succeeded rather than relying on the presence of a drive letter.</returns>
     public async Task<UnmountAndUnmapResult> UnmountAndUnmapAsync(
         int diskIndex,
         char? driveLetter = null,
         IProgress<string>? progress = null)
     {
+        if (diskIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(diskIndex), "Disk index must be greater than or equal to 0.");
+
         progress?.Report($"Starting unmount operation for disk {diskIndex}...");
 
         // Step 1: Unmap drive letter (if provided)
+        string? unmappedDriveLetter = null;
         if (driveLetter.HasValue)
         {
             progress?.Report($"Unmapping drive letter {driveLetter}:...");
@@ -51,6 +55,7 @@ public class UnmountOrchestrator : IUnmountOrchestrator
             else
             {
                 progress?.Report($"Drive letter {driveLetter}: unmapped successfully");
+                unmappedDriveLetter = driveLetter.Value.ToString();
             }
         }
 
@@ -71,6 +76,7 @@ public class UnmountOrchestrator : IUnmountOrchestrator
         progress?.Report("Disk unmounted successfully from WSL");
 
         // Return success
-        return UnmountAndUnmapResult.CreateSuccess(diskIndex, driveLetter);
+        return UnmountAndUnmapResult.CreateSuccess(diskIndex, 
+            string.IsNullOrEmpty(unmappedDriveLetter) ? null : unmappedDriveLetter[0]);
     }
 }

@@ -37,6 +37,15 @@ public class ScriptExecutor : IScriptExecutor
         string fsType,
         string? distroName = null)
     {
+        if (string.IsNullOrWhiteSpace(fsType))
+        {
+            return new MountResult
+            {
+                Success = false,
+                ErrorMessage = "Invalid filesystem type"
+            };
+        }
+
         var scriptPath = Path.Combine(_scriptsPath, "Mount-LinuxDiskCore.ps1");
         if (!File.Exists(scriptPath))
         {
@@ -47,8 +56,9 @@ public class ScriptExecutor : IScriptExecutor
             };
         }
 
+        var trimmedFsType = fsType.Trim();
         var arguments = $"-ExecutionPolicy Bypass -File \"{scriptPath}\" " +
-                       $"-DiskIndex {diskIndex} -Partition {partition} -FsType {fsType}";
+                       $"-DiskIndex {diskIndex} -Partition {partition} -FsType {trimmedFsType}";
 
         if (!string.IsNullOrEmpty(distroName))
         {
@@ -92,8 +102,8 @@ public class ScriptExecutor : IScriptExecutor
         // If parsing failed but there's stderr output, include it in error message
         if (!result.Success && !string.IsNullOrEmpty(error))
         {
-            result.ErrorMessage = string.IsNullOrEmpty(result.ErrorMessage) 
-                ? error 
+            result.ErrorMessage = string.IsNullOrEmpty(result.ErrorMessage)
+                ? error
                 : $"{result.ErrorMessage}\n{error}";
         }
 
@@ -148,9 +158,16 @@ public class ScriptExecutor : IScriptExecutor
         var parsedValues = KeyValueOutputParser.Parse(output);
         var result = UnmappingResult.FromDictionary(parsedValues);
 
-        if (!result.Success && !string.IsNullOrEmpty(error) && string.IsNullOrEmpty(result.ErrorMessage))
+        // Include raw output for debugging and error handling
+        result.RawOutput = output;
+        result.RawError = error;
+
+        // If parsing failed but there's stderr output, include it in error message
+        if (!result.Success && !string.IsNullOrEmpty(error))
         {
-            result.ErrorMessage = error;
+            result.ErrorMessage = string.IsNullOrEmpty(result.ErrorMessage)
+                ? error
+                : $"{result.ErrorMessage}\n{error}";
         }
 
         return result;
@@ -191,16 +208,22 @@ public class ScriptExecutor : IScriptExecutor
             await process.WaitForExitAsync();
 
             // Read output from temp file (script writes there for elevated scenarios)
-            var tempOutputFile = isUnmountOperation 
+            var tempOutputFile = isUnmountOperation
                 ? Path.Combine(Path.GetTempPath(), $"limount_unmount_{diskIndex}.txt")
                 : Path.Combine(Path.GetTempPath(), $"limount_mount_{diskIndex}_{partition}.txt");
 
             // Wait for file to be written
-            for (int i = 0; i < 10; i++)
+            var timeout = TimeSpan.FromSeconds(5); // Increased to more realistic value
+            var pollingInterval = TimeSpan.FromMilliseconds(100);
+            var totalWaitTime = TimeSpan.Zero;
+
+            while (totalWaitTime < timeout)
             {
                 if (File.Exists(tempOutputFile))
                     break;
-                await Task.Delay(100);
+
+                await Task.Delay(pollingInterval);
+                totalWaitTime += pollingInterval;
             }
 
             if (File.Exists(tempOutputFile))
@@ -248,10 +271,14 @@ public class ScriptExecutor : IScriptExecutor
                 return ("STATUS=ERROR\nErrorMessage=Failed to start PowerShell process", string.Empty);
             }
 
-            var output = await process.StandardOutput.ReadToEndAsync();
-            var error = await process.StandardError.ReadToEndAsync();
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask = process.StandardError.ReadToEndAsync();
+            var exitTask = process.WaitForExitAsync();
 
-            await process.WaitForExitAsync();
+            await Task.WhenAll(outputTask, errorTask, exitTask);
+
+            var output = await outputTask;
+            var error = await errorTask;
 
             return (output, error);
         }

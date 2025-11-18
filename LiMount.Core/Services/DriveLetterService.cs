@@ -12,9 +12,8 @@ namespace LiMount.Core.Services;
 public class DriveLetterService : IDriveLetterService
 {
     /// <summary>
-    /// Gets all drive letters currently in use on the system.
-    /// Uses DriveInfo.GetDrives() and also checks for network/subst drives.
-    /// Retrieves the drive letters currently in use on the system (A-Z), returned in ascending order.
+    /// Retrieves the drive letters currently in use on the system via DriveInfo.GetDrives().
+    /// Returns letters A-Z in ascending order. Network and subst drives are included if reported by DriveInfo.
     /// </summary>
     /// <returns>A read-only list of uppercase drive letters that are currently in use (sorted A→Z). If drive enumeration fails, returns any letters that were successfully collected.</returns>
     public IReadOnlyList<char> GetUsedLetters()
@@ -46,9 +45,7 @@ public class DriveLetterService : IDriveLetterService
     }
 
     /// <summary>
-    /// Gets all available (free) drive letters.
-    /// Returns letters A-Z that are not in use, sorted Z→A (preferred order).
-    /// Gets the available drive letters (A–Z) that are not currently in use.
+    /// Returns all available uppercase drive letters A–Z not currently in use, sorted from 'Z' to 'A'.
     /// </summary>
     /// <returns>A read-only list of uppercase drive letters not in use, sorted from 'Z' to 'A'.</returns>
     public IReadOnlyList<char> GetFreeLetters()
@@ -62,12 +59,12 @@ public class DriveLetterService : IDriveLetterService
     }
 
     /// <summary>
-    /// Checks if a specific drive letter is available (not in use).
-    /// Determines whether the specified drive letter is available for use.
+    /// Checks whether the specified drive letter is available.
     /// </summary>
     /// <param name="letter">Drive letter to check (case-insensitive).</param>
+    /// <param name="usedLetters">Optional collection of used drive letters to avoid enumeration. If null, will call GetUsedLetters().</param>
     /// <returns>`true` if the letter is available (a letter A–Z and not currently in use), `false` otherwise.</returns>
-    public bool IsLetterAvailable(char letter)
+    public bool IsLetterAvailable(char letter, IReadOnlyCollection<char>? usedLetters = null)
     {
         var upperLetter = char.ToUpperInvariant(letter);
         if (upperLetter < 'A' || upperLetter > 'Z')
@@ -75,7 +72,7 @@ public class DriveLetterService : IDriveLetterService
             return false;
         }
 
-        var usedLetters = new HashSet<char>(GetUsedLetters());
-        return !usedLetters.Contains(upperLetter);
+        var usedSet = usedLetters != null ? new HashSet<char>(usedLetters) : new HashSet<char>(GetUsedLetters());
+        return !usedSet.Contains(upperLetter);
     }
 }

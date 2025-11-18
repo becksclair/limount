@@ -62,14 +62,14 @@ public partial class MainViewModel : ObservableObject
     /// <param name="driveLetterService">Service used to obtain available drive letters.</param>
     /// <param name="mountOrchestrator">Service used to orchestrate mounting and mapping operations.</param>
     public MainViewModel(
-        IDiskEnumerationService diskService, 
+        IDiskEnumerationService diskService,
         IDriveLetterService driveLetterService,
         IMountOrchestrator mountOrchestrator)
     {
         _diskService = diskService;
         _driveLetterService = driveLetterService;
         _mountOrchestrator = mountOrchestrator;
-        
+
         PropertyChanged += OnPropertyChanged;
     }
 
@@ -91,29 +91,25 @@ public partial class MainViewModel : ObservableObject
     /// Refreshes the available disks, partitions, and free drive letters.
     /// </summary>
     [RelayCommand]
-    private void Refresh()
+    private async Task RefreshAsync()
     {
-        LoadDisksAndDriveLetters();
+        await LoadDisksAndDriveLetters();
     }
 
     /// <summary>
     /// Initializes the ViewModel by loading disks and drive letters asynchronously.
     /// Call this after instantiation to perform heavy I/O operations.
     /// </summary>
-    public async Task InitializeAsync()
+    /// <param name="cancellationToken">Token to cancel initialization if the window closes.</param>
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            // Run data retrieval on background thread
-            var data = await Task.Run(GetDisksAndDriveLettersData);
-            
-            // Update UI on UI thread
-            await Application.Current.Dispatcher.InvokeAsync(() => UpdateUIWithData(data));
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"Error loading disks: {ex.Message}";
-        }
+        StatusMessage = "Loading disks and drive letters...";
+
+        // Run data retrieval on background thread
+        var data = await Task.Run(GetDisksAndDriveLettersData);
+
+        // Update UI on UI thread
+        await Application.Current.Dispatcher.InvokeAsync(() => UpdateUIWithData(data));
     }
 
     /// <summary>
@@ -122,15 +118,15 @@ public partial class MainViewModel : ObservableObject
     /// <remarks>
     /// Updates the Disks and FreeDriveLetters collections, may set SelectedDisk and SelectedDriveLetter if they are not already set, and writes progress or error text to StatusMessage.
     /// </remarks>
-    private void LoadDisksAndDriveLetters()
+    private async Task LoadDisksAndDriveLetters()
     {
         try
         {
             StatusMessage = "Loading disks and drive letters...";
-            
-            // Get data synchronously on UI thread
-            var data = GetDisksAndDriveLettersData();
-            
+
+            // Get data on background thread
+            var data = await Task.Run(GetDisksAndDriveLettersData);
+
             // Update UI on UI thread
             UpdateUIWithData(data);
         }
@@ -153,7 +149,7 @@ public partial class MainViewModel : ObservableObject
         // Get free drive letters (sorted Z→A) and convert to DriveLetterInfo objects
         var freeLetters = _driveLetterService.GetFreeLetters()
             .Select(letter => new DriveLetterInfo { Letter = letter, IsInUse = false });
-        
+
         return (candidateDisks, freeLetters);
     }
 
@@ -164,7 +160,7 @@ public partial class MainViewModel : ObservableObject
     private void UpdateUIWithData((IEnumerable<DiskInfo> candidateDisks, IEnumerable<DriveLetterInfo> freeLetters) data)
     {
         var (candidateDisks, freeLetters) = data;
-        
+
         Disks.Clear();
         foreach (var disk in candidateDisks)
         {
@@ -247,7 +243,7 @@ public partial class MainViewModel : ObservableObject
         try
         {
             var progress = new Progress<string>(msg => StatusMessage = msg);
-            
+
             var result = await _mountOrchestrator.MountAndMapAsync(
                 SelectedDisk.Index,
                 SelectedPartition.PartitionNumber,
@@ -255,7 +251,7 @@ public partial class MainViewModel : ObservableObject
                 SelectedFsType,
                 null,
                 progress);
-            
+
             if (!result.Success)
             {
                 StatusMessage = result.ErrorMessage ?? "Mount and map operation failed.";

@@ -56,8 +56,6 @@ public class MountAndMapResult
     public DateTime Timestamp { get; set; } = DateTime.Now;
 
     /// <summary>
-    /// Creates a successful result.
-    /// <summary>
     /// Create a MountAndMapResult representing a successful mount-and-map operation.
     /// </summary>
     /// <param name="diskIndex">The disk index that was mounted.</param>
@@ -87,8 +85,6 @@ public class MountAndMapResult
         };
     }
 
-    /// <summary>
-    /// Creates a failure result.
     /// <summary>
     /// Creates a result representing a failed mount-and-map operation.
     /// </summary>

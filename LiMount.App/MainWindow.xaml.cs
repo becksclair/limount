@@ -10,11 +10,13 @@ namespace LiMount.App;
 public partial class MainWindow : Window
 {
     private readonly ILogger<MainWindow> _logger;
+    private readonly CancellationTokenSource _cancellationTokenSource = new();
 
     /// <summary>
     /// Initializes the window, assigns the provided view model to DataContext, and registers an asynchronous Loaded handler that initializes the view model; initialization failures are handled by showing a critical error and closing the window.
     /// </summary>
     /// <param name="viewModel">The view model instance to attach to the window as its DataContext and to initialize on load.</param>
+    /// <param name="logger">The logger instance for logging initialization events and errors.</param>
     public MainWindow(MainViewModel viewModel, ILogger<MainWindow> logger)
     {
         InitializeComponent();
@@ -29,30 +31,32 @@ public partial class MainWindow : Window
         {
             try
             {
-                await InitializeViewModelAsync(viewModel);
+                await InitializeViewModelAsync(viewModel, _cancellationTokenSource.Token);
             }
             catch (Exception ex)
             {
                 _logger.LogCritical(ex, "Unhandled exception in MainWindow Loaded event during ViewModel initialization");
 
-                // Ensure UI updates are dispatched to UI thread
-                if (Dispatcher.CheckAccess())
-                {
-                    ShowCriticalErrorAndClose(ex);
-                }
-                else
-                {
-                    Dispatcher.Invoke(() => ShowCriticalErrorAndClose(ex));
-                }
+                ShowCriticalErrorAndClose(ex);
             }
         };
+
+        // Subscribe to Closed event for proper cleanup
+        Closed += (sender, e) =>
+        {
+            _cancellationTokenSource.Cancel();
+            _cancellationTokenSource.Dispose();
+        };
+
+        Closing += (sender, e) => _cancellationTokenSource.Cancel();
     }
 
     /// <summary>
     /// Initializes the provided MainViewModel with retry logic and exponential backoff; on repeated failures shows retry prompts and disables the UI if initialization cannot complete.
     /// </summary>
     /// <param name="viewModel">The MainViewModel to initialize; on failure this method may display dialogs prompting the user to retry and may disable the UI if initialization fails permanently.</param>
-    private async Task InitializeViewModelAsync(MainViewModel viewModel)
+    /// <param name="cancellationToken">Token to cancel initialization if the window closes.</param>
+    private async Task InitializeViewModelAsync(MainViewModel viewModel, CancellationToken cancellationToken)
     {
         const int maxRetries = 2;
         const int baseDelayMs = 1000;
@@ -60,20 +64,36 @@ public partial class MainWindow : Window
         int retryCount = 0;
         bool extraRetryUsed = false;
 
-        while (retryCount <= maxRetries)
+        while (retryCount <= maxRetries && !cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await viewModel.InitializeAsync();
+                await viewModel.InitializeAsync(cancellationToken);
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Initialization cancelled due to window closure");
                 return;
             }
             catch (Exception ex)
             {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    _logger.LogInformation("Initialization cancelled due to window closure");
+                    return;
+                }
+
                 _logger.LogError(ex, "Failed to initialize ViewModel (attempt {Attempt}/{MaxAttempts})", retryCount + 1, maxRetries + 1);
 
                 if (retryCount == maxRetries)
                 {
                     // Final attempt failed - show error dialog and disable UI
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
                     var result = MessageBox.Show(
                         "Failed to initialize the application. This may be due to missing dependencies or insufficient permissions.\n\n" +
                         $"Error: {ex.Message}\n\n" +
@@ -87,7 +107,7 @@ public partial class MainWindow : Window
                         extraRetryUsed = true;
                         // Apply exponential backoff delay before final retry
                         var delay = Math.Min(baseDelayMs * (int)Math.Pow(2, retryCount), maxDelayMs);
-                        await Task.Delay(delay);
+                        await Task.Delay(delay, cancellationToken);
                         continue;
                     }
 
@@ -97,6 +117,11 @@ public partial class MainWindow : Window
                 }
 
                 // Show retry dialog for non-final attempts
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
                 var retryResult = MessageBox.Show(
                     $"Initialization failed (attempt {retryCount + 1} of {maxRetries + 1}).\n\n" +
                     $"Error: {ex.Message}\n\n" +
@@ -113,7 +138,7 @@ public partial class MainWindow : Window
 
                 // Apply exponential backoff delay before retry
                 var retryDelay = Math.Min(baseDelayMs * (int)Math.Pow(2, retryCount), maxDelayMs);
-                await Task.Delay(retryDelay);
+                await Task.Delay(retryDelay, cancellationToken);
             }
 
             retryCount++;

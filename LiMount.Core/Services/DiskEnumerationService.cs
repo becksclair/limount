@@ -19,9 +19,6 @@ namespace LiMount.Core.Services;
 public class DiskEnumerationService : IDiskEnumerationService
 {
     /// <summary>
-    /// Enumerates all physical disk drives on the system.
-    /// </summary>
-    /// <summary>
     /// Enumerates physical disk drives on the system and returns DiskInfo objects populated with their partition details.
     /// </summary>
     /// <returns>A list of DiskInfo objects for each detected physical disk, each including associated PartitionInfo entries; the list may be empty if enumeration encounters an error.</returns>
@@ -49,9 +46,6 @@ public class DiskEnumerationService : IDiskEnumerationService
         return disks;
     }
 
-    /// <summary>
-    /// Gets only disks that are candidates for mounting (non-system, non-boot).
-    /// Prefers disks with at least one likely Linux partition.
     /// <summary>
     /// Get candidate disks excluding system and boot disks, preferring disks that contain Linux-like partitions.
     /// </summary>
@@ -286,9 +280,9 @@ public class DiskEnumerationService : IDiskEnumerationService
                         }
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Ignore errors
+                    System.Diagnostics.Debug.WriteLine($"Failed to get Windows folder while determining system/boot disk: {ex.ToString()}");
                 }
             }
         }

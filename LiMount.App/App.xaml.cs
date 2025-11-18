@@ -4,6 +4,8 @@ using Microsoft.Extensions.Logging;
 using LiMount.App.ViewModels;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Services;
+using Serilog;
+using System.IO;
 
 namespace LiMount.App;
 
@@ -33,14 +35,58 @@ public partial class App : Application
     /// </summary>
     /// <remarks>
     /// Core services are registered as singletons; orchestrators, view models, and the main window are registered as transient.
-    /// Logging is configured with the Debug provider and a minimum level of Information.
+    /// Logging is configured with the Debug provider for development and conditional file logging for production.
     /// </remarks>
     private void ConfigureServices(IServiceCollection services)
     {
+        // Configure Serilog for file logging
+        var logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                                   "LiMount", "logs", "limount-.log");
+
+        // Check if we're in production (not debugging) or explicitly enabled via environment variable
+        var isProduction = !System.Diagnostics.Debugger.IsAttached ||
+                           Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")?.Equals("Production", StringComparison.OrdinalIgnoreCase) == true;
+
+        // Configure Serilog with error handling
+        var serilogConfig = new LoggerConfiguration()
+            .MinimumLevel.Information()
+            .Enrich.FromLogContext();
+
+        // Add file logging for production
+        if (isProduction)
+        {
+            try
+            {
+                // Ensure log directory exists
+                var logDirectory = Path.GetDirectoryName(logPath);
+                if (!string.IsNullOrEmpty(logDirectory))
+                {
+                    Directory.CreateDirectory(logDirectory);
+                }
+
+                serilogConfig.WriteTo.File(
+                    path: logPath,
+                    rollingInterval: RollingInterval.Day,
+                    retainedFileCountLimit: 7, // Keep last 7 days
+                    fileSizeLimitBytes: 10 * 1024 * 1024, // 10MB per file
+                    rollOnFileSizeLimit: true,
+                    outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}"
+                );
+            }
+            catch (Exception ex)
+            {
+                // Fall back to debug-only logging if file logging setup fails
+                System.Diagnostics.Debug.WriteLine($"Failed to configure file logging: {ex.Message}");
+            }
+        }
+
+        var logger = serilogConfig.CreateLogger();
+
         // Register logging
         services.AddLogging(builder =>
         {
             builder.AddDebug();
+            builder.AddSerilog(logger, dispose: true);
             builder.SetMinimumLevel(LogLevel.Information);
         });
 
@@ -67,6 +113,11 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // Log application startup and version for diagnostics
+        var logger = _serviceProvider?.GetService<ILogger<App>>();
+        logger?.LogInformation("LiMount application started successfully. Version: {Version}",
+            System.Reflection.Assembly.GetExecutingAssembly().GetName().Version);
 
         // Create and show the main window using DI
         var mainWindow = _serviceProvider?.GetRequiredService<MainWindow>();
