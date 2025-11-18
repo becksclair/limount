@@ -14,6 +14,12 @@ public partial class App : Application
 {
     private ServiceProvider? _serviceProvider;
 
+    /// <summary>
+    /// Initializes the application and configures dependency injection.
+    /// </summary>
+    /// <remarks>
+    /// Registers services, builds the service provider, and stores it for resolving application dependencies.
+    /// </remarks>
     public App()
     {
         // Set up dependency injection
@@ -22,6 +28,13 @@ public partial class App : Application
         _serviceProvider = services.BuildServiceProvider();
     }
 
+    /// <summary>
+    /// Registers application services, view models, windows, and logging into the provided dependency injection service collection.
+    /// </summary>
+    /// <remarks>
+    /// Core services are registered as singletons; orchestrators, view models, and the main window are registered as transient.
+    /// Logging is configured with the Debug provider and a minimum level of Information.
+    /// </remarks>
     private void ConfigureServices(IServiceCollection services)
     {
         // Register logging
@@ -47,6 +60,10 @@ public partial class App : Application
         services.AddTransient<MainWindow>();
     }
 
+    /// <summary>
+    /// Initializes application startup by resolving the main window from the dependency-injection container and displaying it.
+    /// </summary>
+    /// <param name="e">Event data for the startup event.</param>
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -56,6 +73,10 @@ public partial class App : Application
         mainWindow?.Show();
     }
 
+    /// <summary>
+    /// Performs application shutdown by disposing the dependency injection service provider and then executing base shutdown processing.
+    /// </summary>
+    /// <param name="e">Event data for the application exit.</param>
     protected override void OnExit(ExitEventArgs e)
     {
         _serviceProvider?.Dispose();

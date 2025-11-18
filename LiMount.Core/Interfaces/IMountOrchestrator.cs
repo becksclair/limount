@@ -16,7 +16,16 @@ public interface IMountOrchestrator
     /// <param name="fsType">Filesystem type</param>
     /// <param name="distroName">Optional WSL distribution name</param>
     /// <param name="progress">Optional progress callback</param>
-    /// <returns>Combined result of mount and mapping operations</returns>
+    /// <summary>
+        /// Orchestrates mounting a disk partition inside WSL and mapping it to a Windows drive letter.
+        /// </summary>
+        /// <param name="diskIndex">Physical disk index containing the target partition.</param>
+        /// <param name="partition">Partition number on the specified disk to mount.</param>
+        /// <param name="driveLetter">Windows drive letter to assign to the mounted partition.</param>
+        /// <param name="fsType">Filesystem type to use for mounting (defaults to "ext4").</param>
+        /// <param name="distroName">Optional WSL distribution name to perform the mount within; uses the default distribution if null.</param>
+        /// <param name="progress">Optional progress reporter that receives human-readable status updates.</param>
+        /// <returns>A MountAndMapResult representing the outcome of the mount and mapping operations.</returns>
     Task<MountAndMapResult> MountAndMapAsync(
         int diskIndex,
         int partition,

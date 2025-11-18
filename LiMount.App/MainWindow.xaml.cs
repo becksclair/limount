@@ -11,6 +11,10 @@ public partial class MainWindow : Window
 {
     private readonly ILogger<MainWindow> _logger;
 
+    /// <summary>
+    /// Initializes the window, assigns the provided view model to DataContext, and registers an asynchronous Loaded handler that initializes the view model; initialization failures are handled by showing a critical error and closing the window.
+    /// </summary>
+    /// <param name="viewModel">The view model instance to attach to the window as its DataContext and to initialize on load.</param>
     public MainWindow(MainViewModel viewModel, ILogger<MainWindow> logger)
     {
         InitializeComponent();
@@ -44,6 +48,10 @@ public partial class MainWindow : Window
         };
     }
 
+    /// <summary>
+    /// Initializes the provided MainViewModel with retry logic and exponential backoff; on repeated failures shows retry prompts and disables the UI if initialization cannot complete.
+    /// </summary>
+    /// <param name="viewModel">The MainViewModel to initialize; on failure this method may display dialogs prompting the user to retry and may disable the UI if initialization fails permanently.</param>
     private async Task InitializeViewModelAsync(MainViewModel viewModel)
     {
         const int maxRetries = 2;
@@ -112,6 +120,12 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Disables the window UI, presents a permanent startup-failure dialog, and closes the window.
+    /// </summary>
+    /// <remarks>
+    /// Logs a warning and ensures the disable-and-close sequence runs on the UI thread.
+    /// </remarks>
     private void DisableUI()
     {
         _logger.LogWarning("Application UI disabled due to initialization failure");
@@ -126,6 +140,10 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Logs a critical initialization error, displays an error dialog with the exception message, and closes the window.
+    /// </summary>
+    /// <param name="ex">The exception that caused initialization to fail; its message is shown in the dialog.</param>
     private void ShowCriticalErrorAndClose(Exception ex)
     {
         _logger.LogCritical(ex, "Critical error during application initialization - showing error dialog and closing");
@@ -141,6 +159,9 @@ public partial class MainWindow : Window
         Close();
     }
 
+    /// <summary>
+    /// Disables the window's main content, shows a permanent error dialog indicating startup failure, and closes the window.
+    /// </summary>
     private void DisableUIInternal()
     {
         // Find the main grid or container and disable it

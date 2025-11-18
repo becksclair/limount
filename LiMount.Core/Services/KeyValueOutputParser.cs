@@ -12,7 +12,11 @@ public static class KeyValueOutputParser
     /// Keys and values are trimmed of whitespace.
     /// </summary>
     /// <param name="output">Multi-line output from PowerShell script</param>
-    /// <returns>Dictionary of key-value pairs</returns>
+    /// <summary>
+    /// Parses a multiline key=value string (one pair per line) into a case-insensitive dictionary.
+    /// </summary>
+    /// <param name="output">Multiline text containing key=value lines; lines without a leading key or without '=' are ignored.</param>
+    /// <returns>A dictionary mapping keys to their trimmed values with case-insensitive keys; returns an empty dictionary if <paramref name="output"/> is null or whitespace.</returns>
     public static Dictionary<string, string> Parse(string output)
     {
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -55,7 +59,11 @@ public static class KeyValueOutputParser
 
     /// <summary>
     /// Checks if the parsed output indicates success (STATUS=OK).
+    /// <summary>
+    /// Determine whether the parsed key/value output indicates success.
     /// </summary>
+    /// <param name="values">Parsed key/value pairs; the method checks the "STATUS" entry if present.</param>
+    /// <returns>`true` if the "STATUS" value equals "OK" (case-insensitive), `false` otherwise.</returns>
     public static bool IsSuccess(Dictionary<string, string> values)
     {
         return values.TryGetValue("STATUS", out var status) &&
@@ -64,7 +72,11 @@ public static class KeyValueOutputParser
 
     /// <summary>
     /// Gets the error message from parsed output, if any.
+    /// <summary>
+    /// Retrieves the value associated with the "ErrorMessage" key from the provided key/value pairs.
     /// </summary>
+    /// <param name="values">A dictionary of key/value pairs to search for the error message.</param>
+    /// <returns>The value of the "ErrorMessage" key if present; otherwise <c>null</c>.</returns>
     public static string? GetErrorMessage(Dictionary<string, string> values)
     {
         return values.TryGetValue("ErrorMessage", out var error) ? error : null;

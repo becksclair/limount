@@ -14,11 +14,23 @@ public class ScriptExecutor : IScriptExecutor
 {
     private readonly string _scriptsPath;
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="ScriptExecutor"/> and sets the scripts directory path.
+    /// </summary>
+    /// <param name="scriptsPath">Optional explicit path to the directory containing PowerShell scripts; if null, the implementation locates a suitable scripts directory automatically.</param>
     public ScriptExecutor(string? scriptsPath = null)
     {
         _scriptsPath = scriptsPath ?? FindScriptsPath();
     }
 
+    /// <summary>
+    /// Mounts a Linux disk partition and returns the operation result.
+    /// </summary>
+    /// <param name="diskIndex">Index of the physical disk to mount.</param>
+    /// <param name="partition">Partition number on the disk to mount.</param>
+    /// <param name="fsType">Filesystem type to mount (for example, "ext4").</param>
+    /// <param name="distroName">Optional WSL distribution name to associate with the mount.</param>
+    /// <returns>A MountResult describing the outcome; `Success` is `true` when the disk was mounted, `false` otherwise. `ErrorMessage` contains details on failure.</returns>
     public async Task<MountResult> ExecuteMountScriptAsync(
         int diskIndex,
         int partition,
@@ -48,6 +60,12 @@ public class ScriptExecutor : IScriptExecutor
         return MountResult.FromDictionary(parsedValues);
     }
 
+    /// <summary>
+    /// Maps a WSL network share to the specified drive letter by running the Map-WSLShareToDrive.ps1 PowerShell script.
+    /// </summary>
+    /// <param name="driveLetter">The drive letter to assign (for example, 'Z').</param>
+    /// <param name="targetUNC">The UNC path of the WSL share to map (for example, \\wsl$\distro\share).</param>
+    /// <returns>A MappingResult containing whether the mapping succeeded, any error message, and the script's raw output and error.</returns>
     public async Task<MappingResult> ExecuteMappingScriptAsync(char driveLetter, string targetUNC)
     {
         var scriptPath = Path.Combine(_scriptsPath, "Map-WSLShareToDrive.ps1");
@@ -82,6 +100,11 @@ public class ScriptExecutor : IScriptExecutor
         return result;
     }
 
+    /// <summary>
+    /// Unmounts the Linux disk identified by the given disk index by invoking the Unmount-LinuxDisk.ps1 script.
+    /// </summary>
+    /// <param name="diskIndex">The disk index to unmount.</param>
+    /// <returns>An <see cref="UnmountResult"/> containing whether the operation succeeded and any error information.</returns>
     public async Task<UnmountResult> ExecuteUnmountScriptAsync(int diskIndex)
     {
         var scriptPath = Path.Combine(_scriptsPath, "Unmount-LinuxDisk.ps1");
@@ -101,6 +124,12 @@ public class ScriptExecutor : IScriptExecutor
         return UnmountResult.FromDictionary(parsedValues);
     }
 
+    /// <summary>
+    /// Invokes the Unmap-DriveLetter PowerShell script to unmap the specified drive letter and returns the operation result.
+    /// </summary>
+    /// <returns>
+    /// An <see cref="UnmappingResult"/> representing the outcome; when the script is missing or the script output indicates failure, `Success` will be `false` and `ErrorMessage` will contain details.
+    /// </returns>
     public async Task<UnmappingResult> ExecuteUnmappingScriptAsync(char driveLetter)
     {
         var scriptPath = Path.Combine(_scriptsPath, "Unmap-DriveLetter.ps1");
@@ -120,6 +149,12 @@ public class ScriptExecutor : IScriptExecutor
         return UnmappingResult.FromDictionary(parsedValues);
     }
 
+    /// <summary>
+    /// Runs the specified executable with elevation and returns the script output written to a temporary file.
+    /// </summary>
+    /// <param name="diskIndex">Disk index used to construct the temporary output filename.</param>
+    /// <param name="partition">Partition number used to construct the temporary output filename.</param>
+    /// <returns>The contents of the temporary output file when successful; otherwise a string beginning with "STATUS=ERROR" and an error message.</returns>
     private async Task<string> ExecuteElevatedScriptAsync(
         string fileName,
         string arguments,
@@ -175,6 +210,15 @@ public class ScriptExecutor : IScriptExecutor
         }
     }
 
+    /// <summary>
+    /// Runs a process (typically PowerShell) without elevation and captures its standard output and standard error.
+    /// </summary>
+    /// <param name="fileName">The executable to run (for example, "powershell.exe").</param>
+    /// <param name="arguments">The complete argument string to pass to the process.</param>
+    /// <returns>
+    /// A tuple where `output` is the process's standard output and `error` is the process's standard error.
+    /// If the process fails to start or an exception occurs, `output` contains an error status message and `error` is an empty string.
+    /// </returns>
     private async Task<(string output, string error)> ExecuteNonElevatedScriptAsync(string fileName, string arguments)
     {
         var startInfo = new ProcessStartInfo
@@ -208,6 +252,10 @@ public class ScriptExecutor : IScriptExecutor
         }
     }
 
+    /// <summary>
+    /// Locate the directory that contains the PowerShell scripts used by the executor.
+    /// </summary>
+    /// <returns>The full path to the first existing candidate scripts directory. If none of the checked locations exist, returns the "scripts" subdirectory under the application's base directory.</returns>
     private static string FindScriptsPath()
     {
         var appDirectory = AppDomain.CurrentDomain.BaseDirectory;

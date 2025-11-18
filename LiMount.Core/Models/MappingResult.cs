@@ -39,7 +39,11 @@ public class MappingResult
     /// <summary>
     /// Creates a MappingResult from a dictionary of key-value pairs.
     /// Expected keys: STATUS, DriveLetter, MappedTo, ErrorMessage
+    /// <summary>
+    /// Create a MappingResult from key/value pairs produced by the mapping PowerShell script.
     /// </summary>
+    /// <param name="values">Dictionary of keys produced by the script; keys used: "STATUS" ("OK" indicates success), "DriveLetter", "MappedTo", and "ErrorMessage".</param>
+    /// <returns>A MappingResult whose Success is true when "STATUS" equals "OK", DriveLetter set from "DriveLetter" (or null), TargetUNC set from "MappedTo" (or null), and ErrorMessage set from "ErrorMessage" (or null).</returns>
     public static MappingResult FromDictionary(Dictionary<string, string> values)
     {
         var success = values.TryGetValue("STATUS", out var status) && status == "OK";

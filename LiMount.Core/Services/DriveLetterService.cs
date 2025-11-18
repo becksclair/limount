@@ -15,7 +15,10 @@ public class DriveLetterService : IDriveLetterService
     /// Gets all drive letters currently in use on the system.
     /// Uses DriveInfo.GetDrives() and also checks for network/subst drives.
     /// </summary>
-    /// <returns>List of uppercase drive letters (A-Z) that are in use</returns>
+    /// <summary>
+    /// Retrieves the drive letters currently in use on the system (A–Z), returned in ascending order.
+    /// </summary>
+    /// <returns>A read-only list of uppercase drive letters that are currently in use (sorted A→Z). If drive enumeration fails, returns any letters that were successfully collected.</returns>
     public IReadOnlyList<char> GetUsedLetters()
     {
         var usedLetters = new HashSet<char>();
@@ -48,7 +51,10 @@ public class DriveLetterService : IDriveLetterService
     /// Gets all available (free) drive letters.
     /// Returns letters A-Z that are not in use, sorted Z→A (preferred order).
     /// </summary>
-    /// <returns>List of free drive letters, sorted Z→A</returns>
+    /// <summary>
+    /// Gets the available drive letters (A–Z) that are not currently in use.
+    /// </summary>
+    /// <returns>A read-only list of uppercase drive letters not in use, sorted from 'Z' to 'A'.</returns>
     public IReadOnlyList<char> GetFreeLetters()
     {
         var usedLetters = new HashSet<char>(GetUsedLetters());
@@ -63,7 +69,11 @@ public class DriveLetterService : IDriveLetterService
     /// Checks if a specific drive letter is available (not in use).
     /// </summary>
     /// <param name="letter">Drive letter to check (case-insensitive)</param>
-    /// <returns>True if the letter is free, false if in use</returns>
+    /// <summary>
+    /// Determines whether the specified drive letter is available for use.
+    /// </summary>
+    /// <param name="letter">The drive letter to check (case-insensitive).</param>
+    /// <returns>`true` if the letter is available (a letter A–Z and not currently in use), `false` otherwise.</returns>
     public bool IsLetterAvailable(char letter)
     {
         var upperLetter = char.ToUpperInvariant(letter);

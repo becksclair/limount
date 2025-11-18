@@ -54,6 +54,12 @@ public partial class MainViewModel : ObservableObject
 
     private string? _lastMappedDriveLetter;
 
+    /// <summary>
+    /// Initializes a new instance of MainViewModel and configures it with the provided services; subscribes to property changes so partitions are updated when SelectedDisk changes.
+    /// </summary>
+    /// <param name="diskService">Service used to enumerate candidate disks and their partitions.</param>
+    /// <param name="driveLetterService">Service used to obtain available drive letters.</param>
+    /// <param name="scriptExecutor">Service used to execute mounting and mapping scripts.</param>
     public MainViewModel(IDiskEnumerationService diskService, IDriveLetterService driveLetterService, IScriptExecutor scriptExecutor)
     {
         _diskService = diskService;
@@ -64,6 +70,11 @@ public partial class MainViewModel : ObservableObject
         PropertyChanged += OnPropertyChanged;
     }
 
+    /// <summary>
+    /// Responds to property-change notifications and updates the partition list when <c>SelectedDisk</c> changes.
+    /// </summary>
+    /// <param name="sender">The source of the property change notification.</param>
+    /// <param name="e">The <see cref="PropertyChangedEventArgs"/> identifying the changed property.</param>
     private void OnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(SelectedDisk))
@@ -74,6 +85,8 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>
     /// Loads disks and drive letters from the system.
+    /// <summary>
+    /// Refreshes the available disks, partitions, and free drive letters.
     /// </summary>
     [RelayCommand]
     private void Refresh()
@@ -84,12 +97,20 @@ public partial class MainViewModel : ObservableObject
     /// <summary>
     /// Initializes the ViewModel by loading disks and drive letters asynchronously.
     /// Call this after instantiation to perform heavy I/O operations.
+    /// <summary>
+    /// Loads available disks and free drive letters in the background.
     /// </summary>
     public async Task InitializeAsync()
     {
         await Task.Run(() => LoadDisksAndDriveLetters());
     }
 
+    /// <summary>
+    /// Loads candidate (non-system, non-boot) disks and available drive letters, populates the corresponding collections, and auto-selects defaults when available.
+    /// </summary>
+    /// <remarks>
+    /// Updates the Disks and FreeDriveLetters collections, may set SelectedDisk and SelectedDriveLetter if they are not already set, and writes progress or error text to StatusMessage.
+    /// </remarks>
     private void LoadDisksAndDriveLetters()
     {
         try
@@ -133,6 +154,13 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Populates the Partitions collection with partitions from SelectedDisk that are likely Linux partitions and auto-selects the first one if present.
+    /// </summary>
+    /// <remarks>
+    /// Clears any existing entries in Partitions. If SelectedDisk is null, the method returns without modifying Partitions or SelectedPartition.
+    /// After filtering, SelectedPartition is set to the first partition in the collection or to null if no partitions matched.
+    /// </remarks>
     private void UpdatePartitions()
     {
         Partitions.Clear();
@@ -165,6 +193,8 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>
     /// Mounts the selected disk partition into WSL2 and maps it to a Windows drive letter.
+    /// <summary>
+    /// Mounts the selected partition into WSL using an elevated PowerShell script, maps the resulting UNC path to the chosen Windows drive letter, and updates the view model's status, busy state, and explorer availability based on the outcome.
     /// </summary>
     [RelayCommand(CanExecute = nameof(CanMount))]
     private async Task MountAsync()
@@ -225,6 +255,10 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Determines whether the mount command can be executed given the current state.
+    /// </summary>
+    /// <returns>`true` if the view model is not busy and a disk, a partition, and a drive letter are all selected; `false` otherwise.</returns>
     private bool CanMount()
     {
         return !IsBusy &&
@@ -235,7 +269,12 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>
     /// Opens Windows Explorer to the mapped drive letter.
+    /// <summary>
+    /// Opens Windows Explorer at the last mapped drive letter, if a drive has been mapped.
     /// </summary>
+    /// <remarks>
+    /// If no drive has been mapped this method does nothing. On failure it sets <see cref="StatusMessage"/> with the error message.
+    /// </remarks>
     [RelayCommand(CanExecute = nameof(CanOpenExplorerExecute))]
     private void OpenExplorer()
     {
@@ -255,6 +294,10 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Checks whether Explorer can be opened for the last mapped drive letter.
+    /// </summary>
+    /// <returns>`true` if Explorer is enabled and a previously mapped drive letter is available, `false` otherwise.</returns>
     private bool CanOpenExplorerExecute()
     {
         return CanOpenExplorer && !string.IsNullOrEmpty(_lastMappedDriveLetter);
@@ -262,7 +305,13 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>
     /// Executes the Mount-LinuxDiskCore.ps1 script with elevation.
+    /// <summary>
+    /// Executes the elevated PowerShell mount script for the specified physical disk and partition using the given filesystem type.
     /// </summary>
+    /// <param name="diskIndex">The physical disk index to mount (as reported by the system).</param>
+    /// <param name="partition">The partition number on the disk to mount.</param>
+    /// <param name="fsType">The filesystem type to use when mounting (e.g., "ext4").</param>
+    /// <returns>A <see cref="MountResult"/> describing success or failure and any associated message.</returns>
     private async Task<MountResult> ExecuteMountScriptAsync(int diskIndex, int partition, string fsType)
     {
         var scriptPath = GetScriptPath("Mount-LinuxDiskCore.ps1");
@@ -352,6 +401,11 @@ public partial class MainViewModel : ObservableObject
     }
 
     
+    /// <summary>
+    /// Locate a script file by searching several likely "scripts" directories relative to the application's base directory.
+    /// </summary>
+    /// <param name="scriptFileName">The file name of the script to locate (e.g., "Mount-LinuxDiskCore.ps1").</param>
+    /// <returns>The full path to the first matching script file found; if none are found, returns a fallback path under the application's "scripts" folder.</returns>
     private string GetScriptPath(string scriptFileName)
     {
         // Try to locate the script relative to the application directory
