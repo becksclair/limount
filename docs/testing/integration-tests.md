@@ -68,6 +68,8 @@ dotnet test --collect:"XCode Code Coverage"
 
 ### Scenario 1: Basic Mount and Map Workflow
 
+**Estimated time**: 2-3 minutes
+
 **Prerequisites**:
 - Windows 11 with WSL2 installed
 - At least one WSL distro (Ubuntu recommended)
@@ -118,6 +120,8 @@ Test-Path \\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p1
 
 ### Scenario 2: Mount State Persistence
 
+**Estimated time**: 3-4 minutes
+
 **Purpose**: Verify that mount state survives application restart
 
 **Steps**:
@@ -148,6 +152,8 @@ Get-Content "$env:LocalAppData\LiMount\mount-state.json" | ConvertFrom-Json
 ---
 
 ### Scenario 3: Mount History Tracking
+
+**Estimated time**: 1-2 minutes
 
 **Purpose**: Verify that all mount/unmount operations are logged
 
@@ -180,6 +186,8 @@ Get-Content "$env:LocalAppData\LiMount\mount-history.json" | ConvertFrom-Json
 
 ### Scenario 4: Error Handling - Invalid Disk Selection
 
+**Estimated time**: 30 seconds
+
 **Purpose**: Verify graceful error handling for invalid selections
 
 **Steps**:
@@ -207,6 +215,8 @@ Get-Content "$env:LocalAppData\LiMount\mount-history.json" | ConvertFrom-Json
 
 ### Scenario 5: Error Handling - WSL Not Running
 
+**Estimated time**: 1 minute
+
 **Purpose**: Verify environment validation detects WSL issues
 
 **Steps**:
@@ -229,6 +239,8 @@ wsl --list --verbose  # Should show "Stopped"
 
 ### Scenario 6: Error Handling - Drive Letter Already in Use
 
+**Estimated time**: 2 minutes
+
 **Purpose**: Verify detection of drive letter conflicts
 
 **Steps**:
@@ -248,6 +260,8 @@ wsl --list --verbose  # Should show "Stopped"
 ---
 
 ### Scenario 7: Concurrent Mounts
+
+**Estimated time**: 4-5 minutes
 
 **Purpose**: Verify multiple disks can be mounted simultaneously
 
@@ -269,6 +283,8 @@ wsl --list --verbose  # Should show "Stopped"
 ---
 
 ### Scenario 8: PowerShell Script Execution
+
+**Estimated time**: 3-4 minutes
 
 **Purpose**: Verify PowerShell scripts execute correctly with elevation
 
@@ -304,6 +320,8 @@ Get-ChildItem $env:TEMP | Where-Object { $_.Name -like "limount_*" }
 
 ### Scenario 9: Logging Verification
 
+**Estimated time**: 2-3 minutes
+
 **Purpose**: Verify Serilog file logging works in production mode
 
 **Steps**:
@@ -333,6 +351,8 @@ Get-Content "$env:LocalAppData\LiMount\logs\limount-*.log" | Select-Object -Firs
 ---
 
 ### Scenario 10: Configuration Customization
+
+**Estimated time**: 2-3 minutes
 
 **Purpose**: Verify appsettings.json configuration is respected
 

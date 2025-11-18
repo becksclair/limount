@@ -202,10 +202,12 @@ Success criteria:
 - Error messages are clear and actionable
 - Failed step tracking enables debugging
 
-Metrics:
-- 27+ tests written without exception handling
-- Zero unhandled exceptions in production logs
-- Average test code reduction: 30% (no try-catch boilerplate)
+Metrics (as of 2025-11-18):
+- 25 tests written without exception handling
+- Zero unhandled exceptions in production logs (target)
+- Average test code reduction: ~30% (no try-catch boilerplate, estimated)
+
+*Note: These metrics should be reviewed quarterly to maintain accuracy*
 
 ## Links
 

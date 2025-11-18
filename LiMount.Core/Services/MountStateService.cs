@@ -228,6 +228,16 @@ public class MountStateService : IMountStateService
             _logger.LogWarning(ex, "Failed to parse state file, starting with empty state");
             return new List<ActiveMount>();
         }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "Failed to read state file due to IO error, starting with empty state");
+            return new List<ActiveMount>();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Failed to access state file due to permissions, starting with empty state");
+            return new List<ActiveMount>();
+        }
     }
 
     /// <summary>
@@ -235,12 +245,25 @@ public class MountStateService : IMountStateService
     /// </summary>
     private async Task SaveMountsInternalAsync(List<ActiveMount> mounts)
     {
-        var options = new JsonSerializerOptions
+        try
         {
-            WriteIndented = true
-        };
+            var options = new JsonSerializerOptions
+            {
+                WriteIndented = true
+            };
 
-        var json = JsonSerializer.Serialize(mounts, options);
-        await File.WriteAllTextAsync(_stateFilePath, json);
+            var json = JsonSerializer.Serialize(mounts, options);
+            await File.WriteAllTextAsync(_stateFilePath, json);
+        }
+        catch (IOException ex)
+        {
+            _logger.LogError(ex, "Failed to save state file due to IO error");
+            throw; // Re-throw for save operations as the caller should handle the failure
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogError(ex, "Failed to save state file due to permissions");
+            throw; // Re-throw for save operations as the caller should handle the failure
+        }
     }
 }

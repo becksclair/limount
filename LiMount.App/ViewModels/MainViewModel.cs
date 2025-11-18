@@ -30,7 +30,7 @@ public partial class MainViewModel : ObservableObject
     private readonly IMountStateService _mountStateService;
     private readonly IEnvironmentValidationService _environmentValidationService;
     private readonly IDialogService _dialogService;
-    private readonly IServiceProvider _serviceProvider;
+    private readonly Func<Views.HistoryWindow> _historyWindowFactory;
     private readonly ILogger<MainViewModel> _logger;
 
     [ObservableProperty]
@@ -106,7 +106,7 @@ public partial class MainViewModel : ObservableObject
     /// <param name="mountStateService">Service used to track active mount state persistently.</param>
     /// <param name="environmentValidationService">Service used to validate the environment meets requirements.</param>
     /// <param name="dialogService">Service used to display dialogs to the user.</param>
-    /// <param name="serviceProvider">Service provider for resolving windows and ViewModels.</param>
+    /// <param name="historyWindowFactory">Factory for creating history window instances.</param>
     /// <param name="logger">Logger for diagnostic information.</param>
     public MainViewModel(
         IDiskEnumerationService diskService,
@@ -116,7 +116,7 @@ public partial class MainViewModel : ObservableObject
         IMountStateService mountStateService,
         IEnvironmentValidationService environmentValidationService,
         IDialogService dialogService,
-        IServiceProvider serviceProvider,
+        Func<Views.HistoryWindow> historyWindowFactory,
         ILogger<MainViewModel> logger)
     {
         _diskService = diskService;
@@ -126,7 +126,7 @@ public partial class MainViewModel : ObservableObject
         _mountStateService = mountStateService;
         _environmentValidationService = environmentValidationService;
         _dialogService = dialogService;
-        _serviceProvider = serviceProvider;
+        _historyWindowFactory = historyWindowFactory;
         _logger = logger;
 
         PropertyChanged += OnPropertyChanged;
@@ -356,7 +356,7 @@ public partial class MainViewModel : ObservableObject
                 Id = Guid.NewGuid().ToString(),
                 MountedAt = DateTime.Now,
                 DiskIndex = result.DiskIndex,
-                PartitionNumber = result.PartitionNumber,
+                PartitionNumber = result.Partition,
                 DriveLetter = result.DriveLetter,
                 DistroName = result.DistroName,
                 MountPathLinux = result.MountPathLinux,
@@ -364,7 +364,16 @@ public partial class MainViewModel : ObservableObject
                 IsVerified = true,
                 LastVerified = DateTime.Now
             };
-            await _mountStateService.RegisterMountAsync(activeMount);
+            
+            try
+            {
+                await _mountStateService.RegisterMountAsync(activeMount);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to persist mount state for disk {DiskIndex} partition {Partition}", result.DiskIndex, result.Partition);
+                StatusMessage = $"Success! Mounted as {SelectedDriveLetter}: - Warning: Could not save mount state to history.";
+            }
 
             StatusMessage = $"Success! Mounted as {SelectedDriveLetter}: - You can now access the Linux partition from Windows Explorer.";
         }
@@ -440,7 +449,7 @@ public partial class MainViewModel : ObservableObject
 
         // Ask for confirmation
         var confirmed = await _dialogService.ConfirmAsync(
-            $"Are you sure you want to unmount disk {CurrentMountedDiskIndex} (Drive {CurrentMountedDriveLetter}:)?\n\n" +
+            $"Are you sure you want to unmount disk {CurrentMountedDiskIndex} (Drive {CurrentMountedDriveLetter ?? "-"}:)?\n\n" +
             "Make sure you have saved and closed any files on this drive before unmounting.",
             "Confirm Unmount",
             DialogType.Warning);
@@ -470,7 +479,15 @@ public partial class MainViewModel : ObservableObject
 
             // Success! Clear mount state
             var diskIndex = CurrentMountedDiskIndex.Value;
-            await _mountStateService.UnregisterMountAsync(diskIndex);
+            
+            try
+            {
+                await _mountStateService.UnregisterMountAsync(diskIndex);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to unregister mount state for disk {DiskIndex}, but proceeding with UI cleanup", diskIndex);
+            }
 
             StatusMessage = $"Successfully unmounted disk {diskIndex}.";
             CurrentMountedDiskIndex = null;
@@ -507,7 +524,7 @@ public partial class MainViewModel : ObservableObject
     {
         try
         {
-            var historyWindow = _serviceProvider.GetRequiredService<HistoryWindow>();
+            var historyWindow = _historyWindowFactory();
             historyWindow.Owner = Application.Current.MainWindow;
             historyWindow.ShowDialog();
         }

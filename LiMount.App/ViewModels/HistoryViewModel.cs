@@ -106,6 +106,7 @@ public partial class HistoryViewModel : ObservableObject
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to clear mount history");
+            StatusMessage = "Failed to clear history.";
             await _dialogService.ShowErrorAsync($"Failed to clear history:\n\n{ex.Message}", "Error");
         }
     }
@@ -139,7 +140,8 @@ public class MountHistoryEntryDisplay
         {
             if (!Success && !string.IsNullOrEmpty(_entry.ErrorMessage))
             {
-                return $"Error: {_entry.ErrorMessage}";
+                var failedStep = !string.IsNullOrEmpty(_entry.FailedStep) ? $" during {_entry.FailedStep}" : "";
+                return $"Error{failedStep}: {_entry.ErrorMessage}";
             }
 
             if (OperationType == "Mount" && !string.IsNullOrEmpty(_entry.MountPathUNC))
@@ -147,7 +149,12 @@ public class MountHistoryEntryDisplay
                 return $"UNC: {_entry.MountPathUNC}";
             }
 
-            return Success ? "Completed successfully" : "Operation failed";
+            if (Success)
+            {
+                return OperationType == "Unmount" ? "Drive unmounted successfully" : "Completed successfully";
+            }
+
+            return "Operation failed";
         }
     }
 }

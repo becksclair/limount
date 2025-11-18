@@ -16,6 +16,8 @@ public class MountOrchestrator : IMountOrchestrator
     private readonly IScriptExecutor _scriptExecutor;
     private readonly IMountHistoryService? _historyService;
     private readonly MountOperationsConfig _config;
+    private readonly int _validatedUncRetries;
+    private readonly int _validatedUncDelayMs;
 
     /// <summary>
     /// Initializes a new instance of <see cref="MountOrchestrator"/> using the provided script executor.
@@ -33,19 +35,23 @@ public class MountOrchestrator : IMountOrchestrator
         ArgumentNullException.ThrowIfNull(config);
         _config = config.Value.MountOperations;
         _historyService = historyService;
+
+        // Validate and clamp UNC retry configuration to prevent unsafe values
+        _validatedUncRetries = Math.Max(0, Math.Min(100, _config.UncAccessibilityRetries));
+        _validatedUncDelayMs = Math.Max(10, Math.Min(5000, _config.UncAccessibilityDelayMs));
     }
 
     /// <summary>
     /// Orchestrates mounting a disk inside WSL and mapping a Windows drive letter to the resulting UNC share.
     /// </summary>
-    /// <param name="diskIndex">Zero-based index of the disk to mount.</param>
-    /// <param name="partition">Partition number on the disk to mount.</param>
-    /// <param name="driveLetter">Drive letter to assign for the Windows mapping.</param>
-    /// <param name="fsType">Filesystem type to use for mounting (e.g., "ext4").</param>
+    /// <param name="diskIndex">Zero-based index of the disk to mount. Must be non-negative.</param>
+    /// <param name="partition">Partition number on the disk to mount. Must be greater than 0.</param>
+    /// <param name="driveLetter">Drive letter to assign for the Windows mapping. Must be a valid letter (A-Z).</param>
+    /// <param name="fsType">Filesystem type to use for mounting (e.g., "ext4"). Cannot be empty or null.</param>
     /// <param name="distroName">Optional WSL distribution name to perform the mount under; if null, a default or detection may be used.</param>
     /// <param name="progress">Optional progress reporter that receives status messages during the operation.</param>
     /// <returns>
-    /// A MountAndMapResult describing the outcome. On success the result contains the disk and partition identifiers, the mapped drive letter, the distribution name, the Linux mount path, and the UNC path. On failure the result contains an error message and the stage that failed ("mount" or "map").
+    /// A MountAndMapResult describing the outcome. On success the result contains the disk and partition identifiers, the mapped drive letter, the distribution name, the Linux mount path, and the UNC path. On failure the result contains an error message and the stage that failed ("validation", "mount", or "map").
     /// </returns>
     public async Task<MountAndMapResult> MountAndMapAsync(
         int diskIndex,
@@ -115,14 +121,14 @@ public class MountOrchestrator : IMountOrchestrator
             progress?.Report("Verifying WSL share accessibility...");
 
             bool uncAccessible = false;
-            for (int i = 0; i < _config.UncAccessibilityRetries; i++)
+            for (int i = 0; i < _validatedUncRetries; i++)
             {
                 if (Directory.Exists(uncPath))
                 {
                     uncAccessible = true;
                     break;
                 }
-                await Task.Delay(_config.UncAccessibilityDelayMs);
+                await Task.Delay(_validatedUncDelayMs);
             }
 
             if (!uncAccessible)

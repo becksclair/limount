@@ -1,8 +1,10 @@
 using System.Runtime.Versioning;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
+using LiMount.Core.Configuration;
 
 namespace LiMount.Core.Services;
 
@@ -14,17 +16,23 @@ public class MountHistoryService : IMountHistoryService
 {
     private readonly ILogger<MountHistoryService> _logger;
     private readonly string _historyFilePath;
+    private readonly int _maxEntries;
     private readonly SemaphoreSlim _fileLock = new(1, 1);
 
     /// <summary>
     /// Initializes a new instance of <see cref="MountHistoryService"/>.
     /// </summary>
     /// <param name="logger">Logger for diagnostic information.</param>
+    /// <param name="config">Optional configuration containing history settings.</param>
     /// <param name="historyFilePath">Optional explicit path to the history file; if null, uses %LocalAppData%\LiMount\mount-history.json</param>
-    public MountHistoryService(ILogger<MountHistoryService> logger, string? historyFilePath = null)
+    public MountHistoryService(
+        ILogger<MountHistoryService> logger,
+        IOptions<LiMountConfiguration>? config = null,
+        string? historyFilePath = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _historyFilePath = historyFilePath ?? GetDefaultHistoryFilePath();
+        _maxEntries = Math.Max(1, config?.Value?.History?.MaxEntries ?? 100);
 
         // Ensure directory exists
         var directory = Path.GetDirectoryName(_historyFilePath);
@@ -54,10 +62,10 @@ public class MountHistoryService : IMountHistoryService
             var history = await LoadHistoryInternalAsync();
             history.Add(entry);
 
-            // Keep only the last 100 entries to prevent unbounded growth
-            if (history.Count > 100)
+            // Keep only the last configured number of entries to prevent unbounded growth
+            if (history.Count > _maxEntries)
             {
-                history = history.OrderByDescending(e => e.Timestamp).Take(100).ToList();
+                history = history.OrderByDescending(e => e.Timestamp).Take(_maxEntries).ToList();
             }
 
             await SaveHistoryInternalAsync(history);

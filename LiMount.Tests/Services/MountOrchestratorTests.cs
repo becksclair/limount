@@ -183,7 +183,7 @@ public class MountOrchestratorTests
         result.Should().NotBeNull();
         result.Success.Should().BeTrue();
         result.DiskIndex.Should().Be(1);
-        result.PartitionNumber.Should().Be(1);
+        result.Partition.Should().Be(1);
         result.DriveLetter.Should().Be('Z');
         result.DistroName.Should().Be("Ubuntu");
         result.MountPathLinux.Should().Be("/mnt/wsl/PHYSICALDRIVE1p1");

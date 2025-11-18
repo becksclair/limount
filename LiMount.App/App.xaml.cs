@@ -125,6 +125,9 @@ public partial class App : Application
         // Register Windows
         services.AddTransient<MainWindow>();
         services.AddTransient<Views.HistoryWindow>();
+        
+        // Register Window factories
+        services.AddTransient<Func<Views.HistoryWindow>>(sp => () => sp.GetRequiredService<Views.HistoryWindow>());
     }
 
     /// <summary>

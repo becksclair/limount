@@ -279,9 +279,12 @@ public class ScriptExecutor : IScriptExecutor
                 ? Path.Combine(Path.GetTempPath(), $"limount_unmount_{diskIndex}.txt")
                 : Path.Combine(Path.GetTempPath(), $"limount_mount_{diskIndex}_{partition}.txt");
 
-            // Wait for file to be written
-            var timeout = TimeSpan.FromSeconds(_config.TempFilePollingTimeoutSeconds);
-            var pollingInterval = TimeSpan.FromMilliseconds(_config.PollingIntervalMs);
+            // Wait for file to be written - normalize config values to prevent issues
+            var normalizedTimeoutSeconds = Math.Max(0, Math.Min(_config.TempFilePollingTimeoutSeconds, 300));
+            var normalizedPollingIntervalMs = Math.Max(1, Math.Min(_config.PollingIntervalMs, 10000));
+            
+            var timeout = TimeSpan.FromSeconds(normalizedTimeoutSeconds);
+            var pollingInterval = TimeSpan.FromMilliseconds(normalizedPollingIntervalMs);
             var totalWaitTime = TimeSpan.Zero;
 
             while (totalWaitTime < timeout)

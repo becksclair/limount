@@ -115,8 +115,9 @@ public partial class MainWindow : Window
                     {
                         extraRetryUsed = true;
                         // Apply exponential backoff delay before final retry
-                        var delay = Math.Min(_config.BaseDelayMs * (int)Math.Pow(2, retryCount), _config.MaxDelayMs);
-                        await Task.Delay(delay, cancellationToken);
+                        double delayMs = _config.BaseDelayMs * Math.Pow(2, retryCount);
+                        double clampedDelay = Math.Max(0, Math.Min(delayMs, _config.MaxDelayMs));
+                        await Task.Delay(TimeSpan.FromMilliseconds(clampedDelay), cancellationToken);
                         continue;
                     }
 
@@ -145,8 +146,9 @@ public partial class MainWindow : Window
                 }
 
                 // Apply exponential backoff delay before retry
-                var retryDelay = Math.Min(_config.BaseDelayMs * (int)Math.Pow(2, retryCount), _config.MaxDelayMs);
-                await Task.Delay(retryDelay, cancellationToken);
+                double retryDelayMs = _config.BaseDelayMs * Math.Pow(2, retryCount);
+                double clampedRetryDelay = Math.Max(0, Math.Min(retryDelayMs, _config.MaxDelayMs));
+                await Task.Delay(TimeSpan.FromMilliseconds(clampedRetryDelay), cancellationToken);
             }
 
             retryCount++;

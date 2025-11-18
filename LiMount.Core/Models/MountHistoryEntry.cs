@@ -1,6 +1,22 @@
 namespace LiMount.Core.Models;
 
 /// <summary>
+/// Represents the type of mount operation for history tracking.
+/// </summary>
+public enum MountHistoryOperationType
+{
+    /// <summary>
+    /// Mount and map operation.
+    /// </summary>
+    Mount,
+    
+    /// <summary>
+    /// Unmount and unmap operation.
+    /// </summary>
+    Unmount
+}
+
+/// <summary>
 /// Represents a historical record of a mount or unmount operation.
 /// </summary>
 public class MountHistoryEntry
@@ -16,9 +32,9 @@ public class MountHistoryEntry
     public DateTime Timestamp { get; set; } = DateTime.Now;
 
     /// <summary>
-    /// Type of operation: "Mount" or "Unmount".
+    /// Type of operation.
     /// </summary>
-    public string OperationType { get; set; } = string.Empty;
+    public MountHistoryOperationType OperationType { get; set; }
 
     /// <summary>
     /// Index of the disk involved in the operation.
@@ -72,7 +88,8 @@ public class MountHistoryEntry
     {
         return new MountHistoryEntry
         {
-            OperationType = "Mount",
+            Timestamp = result.Timestamp,
+            OperationType = MountHistoryOperationType.Mount,
             DiskIndex = result.DiskIndex,
             PartitionNumber = result.Partition,
             DriveLetter = result.DriveLetter,
@@ -92,7 +109,8 @@ public class MountHistoryEntry
     {
         return new MountHistoryEntry
         {
-            OperationType = "Unmount",
+            Timestamp = result.Timestamp,
+            OperationType = MountHistoryOperationType.Unmount,
             DiskIndex = result.DiskIndex,
             DriveLetter = result.DriveLetter,
             Success = result.Success,

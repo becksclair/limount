@@ -20,7 +20,15 @@ public partial class HistoryWindow : Window
         // Initialize data when window loads
         Loaded += async (sender, e) =>
         {
-            await viewModel.LoadHistoryAsync();
+            try
+            {
+                await viewModel.LoadHistoryAsync();
+            }
+            catch (Exception ex)
+            {
+                // LoadHistoryAsync should handle errors, but catch any unexpected exceptions
+                System.Diagnostics.Debug.WriteLine($"Unexpected error loading history: {ex}");
+            }
         };
     }
 

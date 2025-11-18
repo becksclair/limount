@@ -155,7 +155,7 @@ public class EnvironmentValidationService : IEnvironmentValidationService
                 return distros;
             }
 
-            var output = await process.StandardOutputAsync.ReadToEndAsync();
+            var output = await process.StandardOutput.ReadToEndAsync();
             await process.WaitForExitAsync();
 
             if (process.ExitCode != 0)

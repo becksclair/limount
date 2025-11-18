@@ -29,7 +29,7 @@ public class MountStateServiceTests : IDisposable
         };
 
         var options = Options.Create(config);
-        _service = new MountStateService(options, null);
+        _service = new MountStateService(NullLogger<MountStateService>.Instance, _testStateFilePath);
     }
 
     public void Dispose()

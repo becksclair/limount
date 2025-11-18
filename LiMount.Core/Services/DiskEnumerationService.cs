@@ -131,7 +131,7 @@ public class DiskEnumerationService : IDiskEnumerationService
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Error getting partitions for disk {diskIndex}: {ex.Message}");
+            _logger.LogWarning(ex, "Error getting partitions for disk {DiskIndex}", diskIndex);
         }
 
         return partitions;
@@ -189,7 +189,7 @@ public class DiskEnumerationService : IDiskEnumerationService
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Error getting logical disk for partition: {ex.Message}");
+                _logger.LogWarning(ex, "Error getting logical disk for partition");
         }
 
         // Determine if likely Linux partition
@@ -293,7 +293,7 @@ public class DiskEnumerationService : IDiskEnumerationService
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Failed to get Windows folder while determining system/boot disk: {ex.ToString()}");
+                    _logger.LogWarning(ex, "Failed to get Windows folder while determining system/boot disk");
                 }
             }
         }
