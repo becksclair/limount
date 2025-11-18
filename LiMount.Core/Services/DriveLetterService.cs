@@ -1,10 +1,13 @@
 using System.Diagnostics;
+using System.Runtime.Versioning;
 
 namespace LiMount.Core.Services;
 
 /// <summary>
 /// Service for enumerating and managing Windows drive letters.
+/// This service is Windows-specific as it manages A-Z drive letters.
 /// </summary>
+[SupportedOSPlatform("windows")]
 public class DriveLetterService
 {
     /// <summary>

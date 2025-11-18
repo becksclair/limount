@@ -176,10 +176,13 @@ MappedTo=\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE2p1
 ### Technologies Used
 
 - **C# / .NET 8**: Core language and runtime (LTS)
+  - **Target Framework**: `net8.0-windows` (Windows-specific)
+  - Both LiMount.Core and LiMount.App target Windows-only APIs
 - **WPF (Windows Presentation Foundation)**: UI framework
 - **CommunityToolkit.Mvvm**: MVVM helpers (RelayCommand, ObservableProperty)
-- **System.Management**: WMI access for disk enumeration
+- **System.Management**: WMI access for disk enumeration (Windows-only)
 - **PowerShell**: Helper scripts for WSL mounting and drive mapping
+- **Platform Attributes**: `[SupportedOSPlatform("windows")]` for Windows-specific services
 
 ### Design Patterns
 
@@ -189,9 +192,9 @@ MappedTo=\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE2p1
 
 ### Key Components
 
-1. **DiskEnumerationService**: Uses WMI (`Win32_DiskDrive`, `Win32_DiskPartition`, `Win32_LogicalDisk`) to enumerate disks and partitions, with heuristics to identify Linux filesystems
+1. **DiskEnumerationService** (Windows-only): Uses WMI (`Win32_DiskDrive`, `Win32_DiskPartition`, `Win32_LogicalDisk`) to enumerate disks and partitions, with heuristics to identify Linux filesystems. Marked with `[SupportedOSPlatform("windows")]` attribute.
 
-2. **DriveLetterService**: Enumerates used and free Windows drive letters using `DriveInfo.GetDrives()`
+2. **DriveLetterService** (Windows-only): Enumerates used and free Windows drive letters using `DriveInfo.GetDrives()`. Manages A-Z drive letter mappings specific to Windows.
 
 3. **KeyValueOutputParser**: Parses `key=value` output from PowerShell scripts into dictionaries
 

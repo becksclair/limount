@@ -1,4 +1,5 @@
 using System.Management;
+using System.Runtime.Versioning;
 using LiMount.Core.Models;
 
 namespace LiMount.Core.Services;
@@ -7,10 +8,13 @@ namespace LiMount.Core.Services;
 /// Service for enumerating physical disks and partitions using WMI.
 /// Uses Win32_DiskDrive, Win32_DiskPartition, Win32_LogicalDisk, and related classes.
 ///
+/// This service is Windows-only as it relies on WMI (Windows Management Instrumentation).
+///
 /// Reference:
 /// - https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-diskdrive
 /// - https://learn.microsoft.com/en-us/windows/win32/wmisdk/wmi-tasks--disks-and-file-systems
 /// </summary>
+[SupportedOSPlatform("windows")]
 public class DiskEnumerationService
 {
     /// <summary>
