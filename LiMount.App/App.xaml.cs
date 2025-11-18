@@ -120,9 +120,11 @@ public partial class App : Application
 
         // Register ViewModels
         services.AddTransient<MainViewModel>();
+        services.AddTransient<HistoryViewModel>();
 
-        // Register MainWindow
+        // Register Windows
         services.AddTransient<MainWindow>();
+        services.AddTransient<Views.HistoryWindow>();
     }
 
     /// <summary>

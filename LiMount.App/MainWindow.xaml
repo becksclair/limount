@@ -145,6 +145,7 @@
         <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
@@ -159,10 +160,18 @@
                     Width="100"
                     Margin="0,0,8,0"/>
 
+            <!-- View History Button -->
+            <Button Grid.Column="1"
+                    Content="View History"
+                    Style="{StaticResource SecondaryButton}"
+                    Command="{Binding OpenHistoryCommand}"
+                    Width="110"
+                    Margin="0,0,8,0"/>
+
             <!-- Spacer -->
 
             <!-- Open in Explorer Button -->
-            <Button Grid.Column="2"
+            <Button Grid.Column="3"
                     x:Name="OpenExplorerButton"
                     Content="Open in Explorer"
                     Style="{StaticResource SecondaryButton}"
@@ -172,7 +181,7 @@
                     Visibility="{Binding CanOpenExplorer, Converter={StaticResource BooleanToVisibilityConverter}}"/>
 
             <!-- Mount Button -->
-            <Button Grid.Column="3"
+            <Button Grid.Column="4"
                     Content="Mount"
                     Style="{StaticResource ModernButton}"
                     Command="{Binding MountCommand}"
@@ -180,7 +189,7 @@
                     Margin="0,0,8,0"/>
 
             <!-- Unmount Button -->
-            <Button Grid.Column="4"
+            <Button Grid.Column="5"
                     x:Name="UnmountButton"
                     Content="Unmount"
                     Style="{StaticResource SecondaryButton}"

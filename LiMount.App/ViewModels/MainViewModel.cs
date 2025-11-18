@@ -4,10 +4,12 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Windows;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Microsoft.Extensions.Logging;
 using LiMount.App.Services;
+using LiMount.App.Views;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
 using LiMount.Core.Services;
@@ -28,6 +30,7 @@ public partial class MainViewModel : ObservableObject
     private readonly IMountStateService _mountStateService;
     private readonly IEnvironmentValidationService _environmentValidationService;
     private readonly IDialogService _dialogService;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<MainViewModel> _logger;
 
     [ObservableProperty]
@@ -103,6 +106,7 @@ public partial class MainViewModel : ObservableObject
     /// <param name="mountStateService">Service used to track active mount state persistently.</param>
     /// <param name="environmentValidationService">Service used to validate the environment meets requirements.</param>
     /// <param name="dialogService">Service used to display dialogs to the user.</param>
+    /// <param name="serviceProvider">Service provider for resolving windows and ViewModels.</param>
     /// <param name="logger">Logger for diagnostic information.</param>
     public MainViewModel(
         IDiskEnumerationService diskService,
@@ -112,6 +116,7 @@ public partial class MainViewModel : ObservableObject
         IMountStateService mountStateService,
         IEnvironmentValidationService environmentValidationService,
         IDialogService dialogService,
+        IServiceProvider serviceProvider,
         ILogger<MainViewModel> logger)
     {
         _diskService = diskService;
@@ -121,6 +126,7 @@ public partial class MainViewModel : ObservableObject
         _mountStateService = mountStateService;
         _environmentValidationService = environmentValidationService;
         _dialogService = dialogService;
+        _serviceProvider = serviceProvider;
         _logger = logger;
 
         PropertyChanged += OnPropertyChanged;
@@ -493,4 +499,22 @@ public partial class MainViewModel : ObservableObject
         return !IsBusy && IsMounted;
     }
 
+    /// <summary>
+    /// Opens the mount history window to display past operations.
+    /// </summary>
+    [RelayCommand]
+    private void OpenHistory()
+    {
+        try
+        {
+            var historyWindow = _serviceProvider.GetRequiredService<HistoryWindow>();
+            historyWindow.Owner = Application.Current.MainWindow;
+            historyWindow.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to open history window");
+            _ = _dialogService.ShowErrorAsync($"Failed to open history window:\n\n{ex.Message}", "Error");
+        }
     }
+}
