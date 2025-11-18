@@ -29,7 +29,11 @@ public class MappingResult
     /// <summary>
     /// Creates a MappingResult from a dictionary of key-value pairs.
     /// Expected keys: STATUS, DriveLetter, MappedTo, ErrorMessage
+    /// <summary>
+    /// Create a MappingResult from a dictionary of key/value pairs produced by the Map-WSLShareToDrive.ps1 script.
     /// </summary>
+    /// <param name="values">Dictionary of output keys to values. Expected keys include "STATUS" (value "OK" indicates success), "DriveLetter", "MappedTo" and "ErrorMessage".</param>
+    /// <returns>A MappingResult with Success set based on "STATUS", DriveLetter from "DriveLetter", TargetUNC from "MappedTo", and ErrorMessage from "ErrorMessage". Missing keys result in null properties.</returns>
     public static MappingResult FromDictionary(Dictionary<string, string> values)
     {
         var success = values.TryGetValue("STATUS", out var status) && status == "OK";

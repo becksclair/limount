@@ -37,7 +37,12 @@ public class UnmountAndUnmapResult
 
     /// <summary>
     /// Creates a successful result.
+    /// <summary>
+    /// Create a successful result for an unmount-and-unmap operation for the specified disk.
     /// </summary>
+    /// <param name="diskIndex">The index of the disk that was unmounted.</param>
+    /// <param name="driveLetter">The unmapped drive letter, or <c>null</c> if none.</param>
+    /// <returns>An <see cref="UnmountAndUnmapResult"/> with <see cref="UnmountAndUnmapResult.Success"/> set to <c>true</c>, <see cref="UnmountAndUnmapResult.DiskIndex"/> set to <paramref name="diskIndex"/>, and <see cref="UnmountAndUnmapResult.DriveLetter"/> set to <paramref name="driveLetter"/>.</returns>
     public static UnmountAndUnmapResult CreateSuccess(
         int diskIndex,
         char? driveLetter = null)
@@ -52,7 +57,13 @@ public class UnmountAndUnmapResult
 
     /// <summary>
     /// Creates a failure result.
+    /// <summary>
+    /// Creates an UnmountAndUnmapResult representing a failed unmount-and-unmap workflow.
     /// </summary>
+    /// <param name="diskIndex">Index of the disk on which the workflow failed.</param>
+    /// <param name="errorMessage">Error message describing the failure.</param>
+    /// <param name="failedStep">The workflow step that failed (e.g., "unmap" or "unmount").</param>
+    /// <returns>An UnmountAndUnmapResult with <c>Success</c> set to <c>false</c>, and <c>DiskIndex</c>, <c>ErrorMessage</c>, and <c>FailedStep</c> populated.</returns>
     public static UnmountAndUnmapResult CreateFailure(
         int diskIndex,
         string errorMessage,

@@ -55,6 +55,11 @@ public class DiskInfo
     /// </summary>
     public bool HasLinuxPartitions => Partitions.Any(p => p.IsLikelyLinux);
 
+    /// <summary>
+    /// Formats a byte count into a human-readable string using units B, KB, MB, GB, and TB.
+    /// </summary>
+    /// <param name="bytes">The size in bytes to format; expected to be zero or positive.</param>
+    /// <returns>A string with the value expressed in the most appropriate unit with up to two decimal places (for example, "1.5 GB").</returns>
     private static string FormatBytes(long bytes)
     {
         string[] sizes = { "B", "KB", "MB", "GB", "TB" };

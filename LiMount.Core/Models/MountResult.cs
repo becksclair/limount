@@ -34,7 +34,11 @@ public class MountResult
     /// <summary>
     /// Creates a MountResult from a dictionary of key-value pairs.
     /// Expected keys: STATUS, DistroName, MountPathLinux, MountPathUNC, ErrorMessage
+    /// <summary>
+    /// Creates a MountResult from a dictionary of key/value pairs produced by the mount script.
     /// </summary>
+    /// <param name="values">A dictionary of script output keys to values. Recognized keys: "STATUS", "DistroName", "MountPathLinux", "MountPathUNC", and "ErrorMessage". Missing keys result in null properties.</param>
+    /// <returns>A MountResult whose properties are populated from the dictionary; <c>Success</c> is <c>true</c> if the "STATUS" value equals "OK", <c>false</c> otherwise.</returns>
     public static MountResult FromDictionary(Dictionary<string, string> values)
     {
         var success = values.TryGetValue("STATUS", out var status) && status == "OK";

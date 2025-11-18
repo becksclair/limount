@@ -21,7 +21,10 @@ public class DiskEnumerationService : IDiskEnumerationService
     /// <summary>
     /// Enumerates all physical disk drives on the system.
     /// </summary>
-    /// <returns>List of DiskInfo with partition details</returns>
+    /// <summary>
+    /// Enumerates physical disk drives on the system and returns their DiskInfo objects including parsed partition details.
+    /// </summary>
+    /// <returns>A read-only list of <see cref="DiskInfo"/> for each detected physical disk; each entry includes its partitions. If an error occurs during enumeration, returns the disks collected so far (possibly empty).</returns>
     public IReadOnlyList<DiskInfo> GetDisks()
     {
         var disks = new List<DiskInfo>();
@@ -49,7 +52,10 @@ public class DiskEnumerationService : IDiskEnumerationService
     /// <summary>
     /// Gets only disks that are candidates for mounting (non-system, non-boot).
     /// Prefers disks with at least one likely Linux partition.
+    /// <summary>
+    /// Selects non-system, non-boot physical disks and orders them to prefer disks that contain likely Linux partitions.
     /// </summary>
+    /// <returns>A read-only list of DiskInfo for candidate disks, ordered by presence of Linux-like partitions (descending) then by disk index (ascending).</returns>
     public IReadOnlyList<DiskInfo> GetCandidateDisks()
     {
         var allDisks = GetDisks();
@@ -64,6 +70,14 @@ public class DiskEnumerationService : IDiskEnumerationService
         return candidateDisks;
     }
 
+    /// <summary>
+    /// Constructs a DiskInfo object from a WMI Win32_DiskDrive ManagementObject.
+    /// </summary>
+    /// <param name="disk">The WMI Win32_DiskDrive object to parse.</param>
+    /// <returns>
+    /// A DiskInfo populated with the disk's index, device ID, model, size in bytes, partition list,
+    /// and system/boot flags determined from the partition data.
+    /// </returns>
     private DiskInfo ParseDiskInfo(ManagementObject disk)
     {
         var index = Convert.ToInt32(disk["Index"]);
@@ -88,6 +102,12 @@ public class DiskEnumerationService : IDiskEnumerationService
         return diskInfo;
     }
 
+    /// <summary>
+    /// Retrieves the partitions associated with the specified physical disk device identifier.
+    /// </summary>
+    /// <param name="diskDeviceId">The WMI DeviceID of the disk (for example "\\.\PHYSICALDRIVE0").</param>
+    /// <param name="diskIndex">The physical disk index (used for context and logging).</param>
+    /// <returns>A list of PartitionInfo objects for partitions found on the disk; may be empty or partially populated if an error occurs during enumeration.</returns>
     private List<PartitionInfo> GetPartitionsForDisk(string diskDeviceId, int diskIndex)
     {
         var partitions = new List<PartitionInfo>();
@@ -115,6 +135,11 @@ public class DiskEnumerationService : IDiskEnumerationService
         return partitions;
     }
 
+    /// <summary>
+    /// Creates a PartitionInfo object from a Win32_DiskPartition WMI object.
+    /// </summary>
+    /// <param name="partition">A WMI Win32_DiskPartition ManagementObject representing the partition to parse.</param>
+    /// <returns>A PartitionInfo populated with partition number and size, optional volume label and filesystem if a logical disk is associated, drive letter presence and value, and a heuristic IsLikelyLinux flag.</returns>
     private PartitionInfo ParsePartitionInfo(ManagementObject partition)
     {
         // Get basic partition info
@@ -171,6 +196,12 @@ public class DiskEnumerationService : IDiskEnumerationService
         return partitionInfo;
     }
 
+    /// <summary>
+    /// Heuristically determines whether a partition is likely a Linux partition.
+    /// </summary>
+    /// <param name="partition">The partition information to evaluate (drive letter and filesystem are considered).</param>
+    /// <param name="partitionType">The partition type string from WMI or the disk metadata used for additional heuristics.</param>
+    /// <returns>`true` if the partition is likely a Linux partition based on absence of a drive letter, filesystem type, or partition type; `false` otherwise.</returns>
     private bool DetermineIsLikelyLinux(PartitionInfo partition, string partitionType)
     {
         // Heuristics for Linux partitions:
@@ -222,6 +253,10 @@ public class DiskEnumerationService : IDiskEnumerationService
         return false;
     }
 
+    /// <summary>
+    /// Marks the disk as the system and boot disk when one of its partitions corresponds to the Windows system drive.
+    /// </summary>
+    /// <param name="diskInfo">The disk whose partitions will be inspected; this method may set its <c>IsSystem</c> and <c>IsBoot</c> flags.</param>
     private void DetermineSystemAndBootFlags(DiskInfo diskInfo)
     {
         // Check if any partition on this disk has the system drive (usually C:)

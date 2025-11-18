@@ -52,6 +52,9 @@ public partial class MainViewModel : ObservableObject
 
     private string? _lastMappedDriveLetter;
 
+    /// <summary>
+    /// Initializes a new MainViewModel, prepares disk and drive-letter services, subscribes to selection changes, and loads initial disk and drive letter data.
+    /// </summary>
     public MainViewModel()
     {
         _diskService = new DiskEnumerationService();
@@ -64,6 +67,11 @@ public partial class MainViewModel : ObservableObject
         LoadDisksAndDriveLetters();
     }
 
+    /// <summary>
+    /// Handles property change notifications and refreshes the partition list when the SelectedDisk property changes.
+    /// </summary>
+    /// <param name="sender">The source of the property change event (typically this view model).</param>
+    /// <param name="e">Property change details; when <see cref="PropertyChangedEventArgs.PropertyName"/> equals <c>SelectedDisk</c>, <see cref="UpdatePartitions"/> is invoked.</param>
     private void OnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(SelectedDisk))
@@ -74,6 +82,8 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>
     /// Loads disks and drive letters from the system.
+    /// <summary>
+    /// Reloads the list of candidate disks and available drive letters and refreshes related view state.
     /// </summary>
     [RelayCommand]
     private void Refresh()
@@ -81,6 +91,14 @@ public partial class MainViewModel : ObservableObject
         LoadDisksAndDriveLetters();
     }
 
+    /// <summary>
+    /// Loads candidate (non-system) disks and available drive letters into the view model's collections.
+    /// </summary>
+    /// <remarks>
+    /// Populates the Disks and FreeDriveLetters collections from the disk and drive-letter services,
+    /// auto-selects the first disk and first free drive letter if none are selected, and updates StatusMessage
+    /// to reflect progress and results. On error, StatusMessage is set to the error message.
+    /// </remarks>
     private void LoadDisksAndDriveLetters()
     {
         try
@@ -124,6 +142,12 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Refreshes the Partitions collection to contain only partitions on the currently selected disk that are likely Linux, and selects the first one if present.
+    /// </summary>
+    /// <remarks>
+    /// Clears the existing Partitions collection before repopulating. If no disk is selected, the method returns without modifying SelectedPartition.
+    /// </remarks>
     private void UpdatePartitions()
     {
         Partitions.Clear();
@@ -156,7 +180,12 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>
     /// Mounts the selected disk partition into WSL2 and maps it to a Windows drive letter.
+    /// <summary>
+    /// Coordinates mounting the selected disk partition into WSL and mapping the resulting UNC share to the chosen Windows drive letter.
     /// </summary>
+    /// <remarks>
+    /// Validates that a disk, partition, and drive letter are selected; sets IsBusy while the operation runs; invokes the mount step and then the mapping step; updates StatusMessage and CanOpenExplorer based on outcome; and records the last mapped drive letter on success.
+    /// </remarks>
     [RelayCommand(CanExecute = nameof(CanMount))]
     private async Task MountAsync()
     {
@@ -216,6 +245,10 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Determines whether the mount command is currently allowed to run.
+    /// </summary>
+    /// <returns>`true` if the view model is not busy and a disk, partition, and drive letter are selected; `false` otherwise.</returns>
     private bool CanMount()
     {
         return !IsBusy &&
@@ -226,7 +259,12 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>
     /// Opens Windows Explorer to the mapped drive letter.
+    /// <summary>
+    /// Opens Windows Explorer at the last mapped drive letter.
     /// </summary>
+    /// <remarks>
+    /// If no drive letter has been mapped this method does nothing. On failure the <see cref="StatusMessage"/> property is updated with the error message.
+    /// </remarks>
     [RelayCommand(CanExecute = nameof(CanOpenExplorerExecute))]
     private void OpenExplorer()
     {
@@ -246,6 +284,10 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Determines whether the OpenExplorer command can execute based on the view model's state.
+    /// </summary>
+    /// <returns>`true` if Explorer can be opened and a mapped drive letter is available, `false` otherwise.</returns>
     private bool CanOpenExplorerExecute()
     {
         return CanOpenExplorer && !string.IsNullOrEmpty(_lastMappedDriveLetter);
@@ -253,7 +295,13 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>
     /// Executes the Mount-LinuxDiskCore.ps1 script with elevation.
+    /// <summary>
+    /// Executes the elevated PowerShell mount script to mount the specified disk partition into WSL and returns the parsed result.
     /// </summary>
+    /// <param name="diskIndex">Physical disk index to mount.</param>
+    /// <param name="partition">Partition number on the disk to mount.</param>
+    /// <param name="fsType">Filesystem type to use when mounting (for example, "ext4").</param>
+    /// <returns>MountResult containing the operation outcome, mount path information when successful, or an error message when failed.</returns>
     private async Task<MountResult> ExecuteMountScriptAsync(int diskIndex, int partition, string fsType)
     {
         var scriptPath = GetScriptPath("Mount-LinuxDiskCore.ps1");
@@ -344,7 +392,12 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>
     /// Executes the Map-WSLShareToDrive.ps1 script (non-elevated).
+    /// <summary>
+    /// Runs the Map-WSLShareToDrive.ps1 PowerShell script to map a WSL share to a Windows drive letter.
     /// </summary>
+    /// <param name="driveLetter">The drive letter to assign (single character, e.g., 'X').</param>
+    /// <param name="targetUNC">The UNC path of the WSL share to map (e.g., \\wsl$\distro\path).</param>
+    /// <returns>A <see cref="MappingResult"/> describing success, the assigned drive letter and target UNC on success, and any error message on failure.</returns>
     private async Task<MappingResult> ExecuteMappingScriptAsync(char driveLetter, string targetUNC)
     {
         var scriptPath = GetScriptPath("Map-WSLShareToDrive.ps1");
@@ -417,6 +470,11 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Resolves the filesystem path to a PowerShell script by searching several candidate locations relative to the application's base directory.
+    /// </summary>
+    /// <param name="scriptFileName">The script file name (for example "Mount-LinuxDiskCore.ps1").</param>
+    /// <returns>The full path to the first matching script found; if none are found, returns the fallback path under the application's "scripts" subdirectory.</returns>
     private string GetScriptPath(string scriptFileName)
     {
         // Try to locate the script relative to the application directory

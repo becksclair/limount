@@ -15,7 +15,13 @@ public class DriveLetterService : IDriveLetterService
     /// Gets all drive letters currently in use on the system.
     /// Uses DriveInfo.GetDrives() and also checks for network/subst drives.
     /// </summary>
-    /// <returns>List of uppercase drive letters (A-Z) that are in use</returns>
+    /// <summary>
+    /// Retrieves the set of drive letters currently in use on the system.
+    /// </summary>
+    /// <remarks>
+    /// Enumeration errors are caught and ignored; if drive enumeration fails, the method returns whatever letters were collected before the failure.
+    /// </remarks>
+    /// <returns>An ascending-sorted list of uppercase drive letters (A–Z) that are currently in use.</returns>
     public IReadOnlyList<char> GetUsedLetters()
     {
         var usedLetters = new HashSet<char>();
@@ -48,7 +54,10 @@ public class DriveLetterService : IDriveLetterService
     /// Gets all available (free) drive letters.
     /// Returns letters A-Z that are not in use, sorted Z→A (preferred order).
     /// </summary>
-    /// <returns>List of free drive letters, sorted Z→A</returns>
+    /// <summary>
+    /// Enumerates drive letters that are not currently in use.
+    /// </summary>
+    /// <returns>A list of available drive letters (A–Z) sorted from 'Z' to 'A'.</returns>
     public IReadOnlyList<char> GetFreeLetters()
     {
         var usedLetters = new HashSet<char>(GetUsedLetters());
@@ -63,7 +72,11 @@ public class DriveLetterService : IDriveLetterService
     /// Checks if a specific drive letter is available (not in use).
     /// </summary>
     /// <param name="letter">Drive letter to check (case-insensitive)</param>
-    /// <returns>True if the letter is free, false if in use</returns>
+    /// <summary>
+    /// Determine whether a drive letter is available (not currently assigned to a mounted drive).
+    /// </summary>
+    /// <param name="letter">The drive letter to check; case is ignored.</param>
+    /// <returns>`true` if the letter is between 'A' and 'Z' and not currently in use, `false` otherwise.</returns>
     public bool IsLetterAvailable(char letter)
     {
         var upperLetter = char.ToUpperInvariant(letter);

@@ -24,7 +24,11 @@ public class UnmappingResult
     /// <summary>
     /// Creates an UnmappingResult from a dictionary of key-value pairs.
     /// Expected keys: STATUS, DriveLetter, ErrorMessage
+    /// <summary>
+    /// Creates an UnmappingResult from a dictionary of key/value pairs produced by the Unmap-DriveLetter script.
     /// </summary>
+    /// <param name="values">Dictionary containing script output keys such as "STATUS", "DriveLetter", and "ErrorMessage".</param>
+    /// <returns>An UnmappingResult with Success true when "STATUS" equals "OK"; DriveLetter and ErrorMessage populated from their respective keys or null if absent.</returns>
     public static UnmappingResult FromDictionary(Dictionary<string, string> values)
     {
         var success = values.TryGetValue("STATUS", out var status) && status == "OK";

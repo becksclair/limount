@@ -13,7 +13,13 @@ public interface IUnmountOrchestrator
     /// <param name="diskIndex">Physical disk index to unmount</param>
     /// <param name="driveLetter">Drive letter to unmap (optional if not mapped)</param>
     /// <param name="progress">Optional progress callback</param>
-    /// <returns>Combined result of unmapping and unmount operations</returns>
+    /// <summary>
+        /// Orchestrates unmapping a drive letter (if provided) and unmounting the specified physical disk from WSL.
+        /// </summary>
+        /// <param name="diskIndex">Physical disk index to unmount.</param>
+        /// <param name="driveLetter">Optional drive letter to unmap before unmounting; null if no unmapping is required.</param>
+        /// <param name="progress">Optional progress callback that receives status messages during the operation.</param>
+        /// <returns>Combined result of the unmapping and unmount operations.</returns>
     Task<UnmountAndUnmapResult> UnmountAndUnmapAsync(
         int diskIndex,
         char? driveLetter = null,

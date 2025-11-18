@@ -24,7 +24,15 @@ public class UnmountResult
     /// <summary>
     /// Creates an UnmountResult from a dictionary of key-value pairs.
     /// Expected keys: STATUS, DiskIndex, ErrorMessage
+    /// <summary>
+    /// Creates an <see cref="UnmountResult"/> from a dictionary of key/value pairs produced by the unmount script.
     /// </summary>
+    /// <param name="values">A map of script output keys to values (e.g., "STATUS", "DiskIndex", "ErrorMessage").</param>
+    /// <returns>
+    /// An <see cref="UnmountResult"/> whose <see cref="UnmountResult.Success"/> is true when the "STATUS" entry equals &quot;OK&quot;,
+    /// <see cref="UnmountResult.DiskIndex"/> is parsed from "DiskIndex" or set to 0 if missing or invalid,
+    /// and <see cref="UnmountResult.ErrorMessage"/> is the value of "ErrorMessage" or null if absent.
+    /// </returns>
     public static UnmountResult FromDictionary(Dictionary<string, string> values)
     {
         var success = values.TryGetValue("STATUS", out var status) && status == "OK";
