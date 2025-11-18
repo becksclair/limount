@@ -51,6 +51,11 @@ public class PartitionInfo
     /// </summary>
     public string DisplayName => $"{Label ?? $"Partition {PartitionNumber}"} – {SizeFormatted}";
 
+    /// <summary>
+    /// Converts a byte count into a concise, human-readable string using binary units (base 1024).
+    /// </summary>
+    /// <param name="bytes">The size in bytes to format; may be zero or negative.</param>
+    /// <returns>A formatted string with up to two decimal places and a unit suffix: one of "B", "KB", "MB", "GB", or "TB".</returns>
     private static string FormatBytes(long bytes)
     {
         string[] sizes = { "B", "KB", "MB", "GB", "TB" };

@@ -37,7 +37,12 @@ public class UnmountAndUnmapResult
 
     /// <summary>
     /// Creates a successful result.
+    /// <summary>
+    /// Creates a successful UnmountAndUnmapResult for the specified disk and optional drive letter.
     /// </summary>
+    /// <param name="diskIndex">Index of the disk that was successfully unmounted and unmapped.</param>
+    /// <param name="driveLetter">Optional drive letter that was unmapped; null if none.</param>
+    /// <returns>An UnmountAndUnmapResult marked as successful with the provided disk index and optional drive letter.</returns>
     public static UnmountAndUnmapResult CreateSuccess(
         int diskIndex,
         char? driveLetter = null)
@@ -52,7 +57,13 @@ public class UnmountAndUnmapResult
 
     /// <summary>
     /// Creates a failure result.
+    /// <summary>
+    /// Creates a result representing a failed unmount-and-unmap operation for the specified disk.
     /// </summary>
+    /// <param name="diskIndex">The index of the disk on which the operation failed.</param>
+    /// <param name="errorMessage">A human-readable error message describing the failure.</param>
+    /// <param name="failedStep">The step that failed (for example "unmap" or "unmount").</param>
+    /// <returns>An <see cref="UnmountAndUnmapResult"/> instance marked as failed with the provided details.</returns>
     public static UnmountAndUnmapResult CreateFailure(
         int diskIndex,
         string errorMessage,

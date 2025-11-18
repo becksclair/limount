@@ -57,7 +57,16 @@ public class MountAndMapResult
 
     /// <summary>
     /// Creates a successful result.
+    /// <summary>
+    /// Create a MountAndMapResult representing a successful mount-and-map operation.
     /// </summary>
+    /// <param name="diskIndex">The disk index that was mounted.</param>
+    /// <param name="partition">The partition number that was mounted.</param>
+    /// <param name="driveLetter">The drive letter assigned when mapping the partition.</param>
+    /// <param name="distroName">The WSL distribution name where the disk was mounted.</param>
+    /// <param name="mountPathLinux">The Linux mount path for the mounted partition.</param>
+    /// <param name="mountPathUNC">The Windows UNC path for the mapped drive.</param>
+    /// <returns>A MountAndMapResult with Success set to `true`, the provided identifiers, drive and path fields populated, and Timestamp set to the current time.</returns>
     public static MountAndMapResult CreateSuccess(
         int diskIndex,
         int partition,
@@ -80,7 +89,14 @@ public class MountAndMapResult
 
     /// <summary>
     /// Creates a failure result.
+    /// <summary>
+    /// Creates a result representing a failed mount-and-map operation.
     /// </summary>
+    /// <param name="diskIndex">The disk index involved in the operation.</param>
+    /// <param name="partition">The partition number involved in the operation.</param>
+    /// <param name="errorMessage">The error message describing why the operation failed.</param>
+    /// <param name="failedStep">Which step failed (for example, "mount" or "map").</param>
+    /// <returns>A MountAndMapResult with Success set to false and the provided error details populated.</returns>
     public static MountAndMapResult CreateFailure(
         int diskIndex,
         int partition,
