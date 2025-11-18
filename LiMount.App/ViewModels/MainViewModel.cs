@@ -26,6 +26,7 @@ public partial class MainViewModel : ObservableObject
     private readonly IMountOrchestrator _mountOrchestrator;
     private readonly IUnmountOrchestrator _unmountOrchestrator;
     private readonly IMountStateService _mountStateService;
+    private readonly IEnvironmentValidationService _environmentValidationService;
     private readonly IDialogService _dialogService;
     private readonly ILogger<MainViewModel> _logger;
 
@@ -100,6 +101,7 @@ public partial class MainViewModel : ObservableObject
     /// <param name="mountOrchestrator">Service used to orchestrate mounting and mapping operations.</param>
     /// <param name="unmountOrchestrator">Service used to orchestrate unmounting and unmapping operations.</param>
     /// <param name="mountStateService">Service used to track active mount state persistently.</param>
+    /// <param name="environmentValidationService">Service used to validate the environment meets requirements.</param>
     /// <param name="dialogService">Service used to display dialogs to the user.</param>
     /// <param name="logger">Logger for diagnostic information.</param>
     public MainViewModel(
@@ -108,6 +110,7 @@ public partial class MainViewModel : ObservableObject
         IMountOrchestrator mountOrchestrator,
         IUnmountOrchestrator unmountOrchestrator,
         IMountStateService mountStateService,
+        IEnvironmentValidationService environmentValidationService,
         IDialogService dialogService,
         ILogger<MainViewModel> logger)
     {
@@ -116,6 +119,7 @@ public partial class MainViewModel : ObservableObject
         _mountOrchestrator = mountOrchestrator;
         _unmountOrchestrator = unmountOrchestrator;
         _mountStateService = mountStateService;
+        _environmentValidationService = environmentValidationService;
         _dialogService = dialogService;
         _logger = logger;
 
@@ -146,16 +150,41 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Initializes the ViewModel by loading disks and drive letters asynchronously.
+    /// Initializes the ViewModel by validating the environment and loading disks and drive letters asynchronously.
     /// Call this after instantiation to perform heavy I/O operations.
     /// </summary>
     /// <param name="cancellationToken">Token to cancel initialization if the window closes.</param>
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        StatusMessage = "Loading disks and drive letters...";
+        StatusMessage = "Validating environment...";
+        _logger.LogInformation("Starting application initialization with environment validation");
+
+        // Validate environment first
+        var validationResult = await _environmentValidationService.ValidateEnvironmentAsync();
+
+        if (!validationResult.IsValid)
+        {
+            _logger.LogWarning("Environment validation failed. Errors: {Errors}", string.Join("; ", validationResult.Errors));
+
+            // Build detailed error message with suggestions
+            var errorMessage = "LiMount cannot start because your system does not meet the requirements:\n\n";
+            errorMessage += string.Join("\n", validationResult.Errors.Select(e => $"• {e}"));
+            errorMessage += "\n\nTo fix these issues:\n\n";
+            errorMessage += string.Join("\n", validationResult.Suggestions.Select(s => $"  {s}"));
+
+            await _dialogService.ShowErrorAsync(errorMessage, "Environment Validation Failed");
+
+            StatusMessage = "Environment validation failed. Please check the requirements.";
+            return;
+        }
+
+        _logger.LogInformation("Environment validation successful. WSL distros: {Distros}",
+            string.Join(", ", validationResult.InstalledDistros));
+
+        StatusMessage = $"Environment OK. Found {validationResult.InstalledDistros.Count} WSL distro(s). Loading disks...";
 
         // Run data retrieval on background thread
-        var data = await Task.Run(GetDisksAndDriveLettersData);
+        var data = await Task.Run(GetDisksAndDriveLettersData, cancellationToken);
 
         // Update UI on UI thread
         await Application.Current.Dispatcher.InvokeAsync(() => UpdateUIWithData(data));

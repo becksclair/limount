@@ -109,6 +109,7 @@ public partial class App : Application
         services.AddSingleton<IScriptExecutor, ScriptExecutor>();
         services.AddSingleton<IMountHistoryService, MountHistoryService>();
         services.AddSingleton<IMountStateService, MountStateService>();
+        services.AddSingleton<IEnvironmentValidationService, EnvironmentValidationService>();
 
         // Register App services
         services.AddSingleton<IDialogService, DialogService>();
