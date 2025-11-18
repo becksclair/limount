@@ -136,7 +136,7 @@ public class MountHistoryService : IMountHistoryService
         {
             var history = await LoadHistoryInternalAsync();
             return history
-                .Where(e => e.DiskIndex == diskIndex && e.OperationType == "Mount" && e.Success)
+                .Where(e => e.DiskIndex == diskIndex && e.OperationType == MountHistoryOperationType.Mount && e.Success)
                 .OrderByDescending(e => e.Timestamp)
                 .FirstOrDefault();
         }

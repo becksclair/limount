@@ -347,7 +347,8 @@ public partial class MainViewModel : ObservableObject
             _lastMappedDriveLetter = SelectedDriveLetter.ToString();
             CurrentMountedDiskIndex = SelectedDisk.Index;
             CurrentMountedPartition = SelectedPartition.PartitionNumber;
-            CurrentMountedDriveLetter = SelectedDriveLetter.Value;
+            var driveLetter = result.DriveLetter ?? SelectedDriveLetter.Value;
+            CurrentMountedDriveLetter = driveLetter;
             CanOpenExplorer = true;
 
             // Register mount state persistently
@@ -357,10 +358,10 @@ public partial class MainViewModel : ObservableObject
                 MountedAt = DateTime.Now,
                 DiskIndex = result.DiskIndex,
                 PartitionNumber = result.Partition,
-                DriveLetter = result.DriveLetter,
-                DistroName = result.DistroName,
-                MountPathLinux = result.MountPathLinux,
-                MountPathUNC = result.MountPathUNC,
+                DriveLetter = driveLetter,
+                DistroName = result.DistroName ?? string.Empty,
+                MountPathLinux = result.MountPathLinux ?? string.Empty,
+                MountPathUNC = result.MountPathUNC ?? string.Empty,
                 IsVerified = true,
                 LastVerified = DateTime.Now
             };
@@ -449,7 +450,7 @@ public partial class MainViewModel : ObservableObject
 
         // Ask for confirmation
         var confirmed = await _dialogService.ConfirmAsync(
-            $"Are you sure you want to unmount disk {CurrentMountedDiskIndex} (Drive {CurrentMountedDriveLetter ?? "-"}:)?\n\n" +
+            $"Are you sure you want to unmount disk {CurrentMountedDiskIndex} (Drive {CurrentMountedDriveLetter?.ToString() ?? "-"}:)?\n\n" +
             "Make sure you have saved and closed any files on this drive before unmounting.",
             "Confirm Unmount",
             DialogType.Warning);

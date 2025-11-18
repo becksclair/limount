@@ -169,8 +169,8 @@ public class MountOrchestratorTests
         var mappingResult = new MappingResult
         {
             Success = true,
-            DriveLetter = 'Z',
-            UNCPath = @"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p1"
+            DriveLetter = "Z",
+            TargetUNC = @"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p1"
         };
         _mockScriptExecutor
             .Setup(e => e.ExecuteMappingScriptAsync('Z', @"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p1"))
@@ -205,7 +205,7 @@ public class MountOrchestratorTests
             .Setup(e => e.ExecuteMountScriptAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
             .ReturnsAsync(mountResult);
 
-        var mappingResult = new MappingResult { Success = true, DriveLetter = 'Z' };
+        var mappingResult = new MappingResult { Success = true, DriveLetter = "Z" };
         _mockScriptExecutor
             .Setup(e => e.ExecuteMappingScriptAsync(It.IsAny<char>(), It.IsAny<string>()))
             .ReturnsAsync(mappingResult);
@@ -215,7 +215,7 @@ public class MountOrchestratorTests
 
         // Assert
         _mockHistoryService.Verify(
-            h => h.AddEntryAsync(It.Is<MountHistoryEntry>(e => e.Success && e.OperationType == "Mount")),
+            h => h.AddEntryAsync(It.Is<MountHistoryEntry>(e => e.Success && e.OperationType == MountHistoryOperationType.Mount)),
             Times.Once);
     }
 
@@ -233,7 +233,7 @@ public class MountOrchestratorTests
 
         // Assert
         _mockHistoryService.Verify(
-            h => h.AddEntryAsync(It.Is<MountHistoryEntry>(e => !e.Success && e.OperationType == "Mount")),
+            h => h.AddEntryAsync(It.Is<MountHistoryEntry>(e => !e.Success && e.OperationType == MountHistoryOperationType.Mount)),
             Times.Once);
     }
 }

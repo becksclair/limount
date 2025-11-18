@@ -161,32 +161,39 @@ Result classes follow this pattern:
 public class MountResult
 {
     public bool Success { get; set; }
+    public string? DistroName { get; set; }       // Only set on success
     public string? MountPathLinux { get; set; }  // Only set on success
+    public string? MountPathUNC { get; set; }    // Only set on success
     public string? ErrorMessage { get; set; }     // Only set on failure
-    public string? FailedStep { get; set; }       // Only set on failure
-    public DateTime Timestamp { get; set; } = DateTime.Now;
 
-    public static MountResult CreateSuccess(string mountPath, string uncPath)
+    /// <summary>
+    /// Creates a MountResult from PowerShell script output dictionary.
+    /// Parses key=value pairs from script stdout/stderr.
+    /// </summary>
+    public static MountResult FromDictionary(Dictionary<string, string> values)
     {
+        var success = KeyValueOutputParser.IsSuccess(values);
+
         return new MountResult
         {
-            Success = true,
-            MountPathLinux = mountPath,
-            MountPathUNC = uncPath
-        };
-    }
-
-    public static MountResult CreateFailure(string errorMessage, string failedStep)
-    {
-        return new MountResult
-        {
-            Success = false,
-            ErrorMessage = errorMessage,
-            FailedStep = failedStep
+            Success = success,
+            DistroName = values.TryGetValue("DistroName", out var distro) ? distro : null,
+            MountPathLinux = values.TryGetValue("MountPathLinux", out var linuxPath) ? linuxPath : null,
+            MountPathUNC = values.TryGetValue("MountPathUNC", out var uncPath) ? uncPath : null,
+            ErrorMessage = values.TryGetValue("ErrorMessage", out var error) ? error : null
         };
     }
 }
 ```
+
+This pattern parses PowerShell script output that produces key=value format (e.g., "STATUS=OK", "MountPathLinux=/mnt/wsl/PHYSICALDRIVE2p1").
+
+**Concrete Properties Per Model**:
+- **MountResult**: `DistroName`, `MountPathLinux`, `MountPathUNC`, `ErrorMessage`
+- **UnmountResult**: `DiskIndex`, `ErrorMessage`
+- **MappingResult**: `DriveLetter`, `TargetUNC`, `ErrorMessage`
+
+**Note**: `MountAndMapResult` is the sole exception using the factory pattern (`CreateSuccess`/`CreateFailure`) rather than `FromDictionary` parsing, as it aggregates results from multiple operations rather than parsing direct script output.
 
 Implemented in:
 - `LiMount.Core/Models/MountResult.cs`

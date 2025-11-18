@@ -1,6 +1,7 @@
 using Moq;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
+using Xunit;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
 using LiMount.Core.Services;
@@ -88,7 +89,7 @@ public class UnmountOrchestratorTests
         var unmappingResult = new UnmappingResult
         {
             Success = true,
-            DriveLetter = 'Z'
+            DriveLetter = "Z"
         };
         _mockScriptExecutor
             .Setup(e => e.ExecuteUnmappingScriptAsync(It.IsAny<char>()))
@@ -120,7 +121,7 @@ public class UnmountOrchestratorTests
         var unmappingResult = new UnmappingResult
         {
             Success = true,
-            DriveLetter = 'Z'
+            DriveLetter = "Z"
         };
         _mockScriptExecutor
             .Setup(e => e.ExecuteUnmappingScriptAsync('Z'))
@@ -150,7 +151,7 @@ public class UnmountOrchestratorTests
     public async Task UnmountAndUnmapAsync_Success_LogsToHistory()
     {
         // Arrange
-        var unmappingResult = new UnmappingResult { Success = true, DriveLetter = 'Z' };
+        var unmappingResult = new UnmappingResult { Success = true, DriveLetter = "Z" };
         _mockScriptExecutor
             .Setup(e => e.ExecuteUnmappingScriptAsync(It.IsAny<char>()))
             .ReturnsAsync(unmappingResult);
@@ -165,7 +166,7 @@ public class UnmountOrchestratorTests
 
         // Assert
         _mockHistoryService.Verify(
-            h => h.AddEntryAsync(It.Is<MountHistoryEntry>(e => e.Success && e.OperationType == "Unmount")),
+            h => h.AddEntryAsync(It.Is<MountHistoryEntry>(e => e.Success && e.OperationType == MountHistoryOperationType.Unmount)),
             Times.Once);
     }
 
@@ -188,7 +189,7 @@ public class UnmountOrchestratorTests
 
         // Assert
         _mockHistoryService.Verify(
-            h => h.AddEntryAsync(It.Is<MountHistoryEntry>(e => !e.Success && e.OperationType == "Unmount")),
+            h => h.AddEntryAsync(It.Is<MountHistoryEntry>(e => !e.Success && e.OperationType == MountHistoryOperationType.Unmount)),
             Times.Once);
     }
 }

@@ -394,6 +394,7 @@ Get-Content ".\LiMount.App\appsettings.json" | ConvertFrom-Json
 Before each release, manually test these critical paths:
 
 ### Happy Path
+
 - [ ] Application launches without errors
 - [ ] Disk enumeration shows Linux partitions
 - [ ] Mount operation completes successfully
@@ -404,6 +405,7 @@ Before each release, manually test these critical paths:
 - [ ] History shows mount/unmount entries
 
 ### Error Paths
+
 - [ ] Mount with no disk selected (validation error)
 - [ ] Mount with WSL not running (environment error)
 - [ ] Mount to already-used drive letter (conflict detected)
@@ -411,18 +413,21 @@ Before each release, manually test these critical paths:
 - [ ] Invalid configuration (app shows error, doesn't crash)
 
 ### Edge Cases
+
 - [ ] Multiple concurrent mounts (all work independently)
 - [ ] Application restart with active mount (state restored)
 - [ ] Disk disconnected while mounted (error handled gracefully)
 - [ ] PowerShell execution policy prevents scripts (clear error message)
 
 ### Performance
+
 - [ ] Disk enumeration completes within 2 seconds
 - [ ] Mount operation completes within 10 seconds (typical case)
 - [ ] UI remains responsive during long operations
 - [ ] Progress messages update smoothly
 
 ### UI/UX
+
 - [ ] All buttons have correct enabled/disabled state
 - [ ] Progress messages are clear and informative
 - [ ] Error messages are actionable
@@ -529,7 +534,7 @@ Due to Windows-specific dependencies, these scenarios are NOT covered by automat
 
 ### Creating a Test Disk with Linux Partition
 
-**Option 1: Virtual Disk (VHD)**
+#### Option 1: Virtual Disk (VHD)
 
 ```powershell
 # Create VHD
@@ -553,7 +558,7 @@ Initialize-Disk -Number $diskNumber -PartitionStyle GPT
 wsl -e sudo mkfs.ext4 /dev/sdX1  # Replace X with appropriate letter
 ```
 
-**Option 2: USB Drive**
+#### Option 2: USB Drive
 
 1. Insert USB drive
 2. Format in Linux/WSL with ext4:
@@ -562,7 +567,7 @@ wsl -e sudo mkfs.ext4 /dev/sdX1  # Replace X with appropriate letter
    ```
 3. Use for testing
 
-**Option 3: Docker Desktop with WSL2 Backend**
+#### Option 3: Docker Desktop with WSL2 Backend
 
 Docker Desktop includes WSL2, which can be used for testing WSL integration.
 

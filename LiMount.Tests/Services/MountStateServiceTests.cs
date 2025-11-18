@@ -1,7 +1,12 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using LiMount.Core.Configuration;
+using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
 using LiMount.Core.Services;
 
@@ -14,26 +19,20 @@ public class MountStateServiceTests : IDisposable
 {
     private readonly string _testStateFilePath;
     private readonly MountStateService _service;
+    private readonly TestDriveLetterService _driveLetterService;
 
     public MountStateServiceTests()
     {
         // Create a temporary file path for testing
         _testStateFilePath = Path.Combine(Path.GetTempPath(), $"limount_test_state_{Guid.NewGuid()}.json");
-
-        var config = new LiMountConfiguration
-        {
-            History = new HistoryConfig
-            {
-                StateFilePath = _testStateFilePath
-            }
-        };
-
-        var options = Options.Create(config);
-        _service = new MountStateService(NullLogger<MountStateService>.Instance, _testStateFilePath);
+        _driveLetterService = new TestDriveLetterService(new[] { 'Z', 'Y', 'X' });
+        _service = CreateService(_driveLetterService);
     }
 
     public void Dispose()
     {
+        _service.Dispose();
+
         // Clean up test file
         if (File.Exists(_testStateFilePath))
         {
@@ -234,6 +233,34 @@ public class MountStateServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ReconcileMountStateAsync_RemovesOrphanWhenDriveLetterNoLongerMapped()
+    {
+        var customStateFile = Path.Combine(Path.GetTempPath(), $"limount_reconcile_{Guid.NewGuid()}.json");
+        var driveLetterService = new TestDriveLetterService(Array.Empty<char>());
+        var service = CreateService(driveLetterService, customStateFile);
+
+        var mount = new ActiveMount
+        {
+            DiskIndex = 21,
+            DriveLetter = 'Q'
+        };
+
+        await service.RegisterMountAsync(mount);
+
+        var orphaned = await service.ReconcileMountStateAsync();
+
+        orphaned.Should().ContainSingle().Which.DriveLetter.Should().Be('Q');
+        (await service.GetActiveMountsAsync()).Should().BeEmpty();
+
+        service.Dispose();
+
+        if (File.Exists(customStateFile))
+        {
+            File.Delete(customStateFile);
+        }
+    }
+
+    [Fact]
     public async Task UnregisterMountAsync_NonExistentDisk_DoesNotThrow()
     {
         // Act
@@ -241,5 +268,58 @@ public class MountStateServiceTests : IDisposable
 
         // Assert
         await act.Should().NotThrowAsync();
+    }
+
+    private MountStateService CreateService(IDriveLetterService driveLetterService, string? stateFilePath = null)
+    {
+        var config = new LiMountConfiguration
+        {
+            History = new HistoryConfig
+            {
+                StateFilePath = stateFilePath ?? _testStateFilePath
+            },
+            MountOperations = new MountOperationsConfig
+            {
+                ReconcileUncAccessibilityTimeoutMs = 200
+            }
+        };
+
+        var options = Options.Create(config);
+        return new MountStateService(
+            NullLogger<MountStateService>.Instance,
+            driveLetterService,
+            options,
+            stateFilePath ?? _testStateFilePath);
+    }
+
+    private sealed class TestDriveLetterService : IDriveLetterService
+    {
+        private readonly IReadOnlyCollection<char> _usedLetters;
+
+        public TestDriveLetterService(IEnumerable<char> usedLetters)
+        {
+            _usedLetters = usedLetters.Select(char.ToUpperInvariant).ToList();
+        }
+
+        public IReadOnlyList<char> GetUsedLetters() => _usedLetters.ToList();
+
+        public IReadOnlyList<char> GetFreeLetters()
+        {
+            var used = new HashSet<char>(_usedLetters);
+            return Enumerable.Range('A', 26)
+                .Select(i => (char)i)
+                .Where(c => !used.Contains(c))
+                .OrderByDescending(c => c)
+                .ToList();
+        }
+
+        public bool IsLetterAvailable(char letter, IReadOnlyCollection<char>? usedLetters = null)
+        {
+            var used = usedLetters != null
+                ? new HashSet<char>(usedLetters.Select(char.ToUpperInvariant))
+                : new HashSet<char>(_usedLetters);
+
+            return !used.Contains(char.ToUpperInvariant(letter));
+        }
     }
 }

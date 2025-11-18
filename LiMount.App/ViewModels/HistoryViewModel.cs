@@ -125,7 +125,7 @@ public class MountHistoryEntryDisplay
     }
 
     public DateTime Timestamp => _entry.Timestamp;
-    public string OperationType => _entry.OperationType;
+    public string OperationType => _entry?.OperationType.ToString() ?? string.Empty;
     public bool Success => _entry.Success;
     public string StatusDisplay => Success ? "Success" : "Failed";
     public int DiskIndex => _entry.DiskIndex;

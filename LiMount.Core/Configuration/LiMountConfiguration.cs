@@ -62,6 +62,11 @@ public class MountOperationsConfig
     /// Delay in milliseconds between UNC accessibility retry attempts.
     /// </summary>
     public int UncAccessibilityDelayMs { get; set; } = 500;
+
+    /// <summary>
+    /// Timeout in milliseconds when checking UNC path accessibility during reconciliation.
+    /// </summary>
+    public int ReconcileUncAccessibilityTimeoutMs { get; set; } = 2000;
 }
 
 /// <summary>

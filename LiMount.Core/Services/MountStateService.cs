@@ -1,6 +1,10 @@
+using System.IO;
+using System.Linq;
 using System.Runtime.Versioning;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using LiMount.Core.Configuration;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
 
@@ -11,21 +15,43 @@ namespace LiMount.Core.Services;
 /// Persists state to JSON file for recovery across application sessions.
 /// </summary>
 [SupportedOSPlatform("windows")]
-public class MountStateService : IMountStateService
+public class MountStateService : IMountStateService, IDisposable
 {
     private readonly ILogger<MountStateService> _logger;
+    private readonly IDriveLetterService _driveLetterService;
     private readonly string _stateFilePath;
     private readonly SemaphoreSlim _fileLock = new(1, 1);
+    private readonly int _reconcileUncCheckTimeoutMs;
+    private bool _disposed;
 
     /// <summary>
     /// Initializes a new instance of <see cref="MountStateService"/>.
     /// </summary>
     /// <param name="logger">Logger for diagnostic information.</param>
     /// <param name="stateFilePath">Optional explicit path to the state file; if null, uses %LocalAppData%\LiMount\mount-state.json</param>
-    public MountStateService(ILogger<MountStateService> logger, string? stateFilePath = null)
+    public MountStateService(
+        ILogger<MountStateService> logger,
+        IDriveLetterService driveLetterService,
+        IOptions<LiMountConfiguration> configuration,
+        string? stateFilePath = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _stateFilePath = stateFilePath ?? GetDefaultStateFilePath();
+        _driveLetterService = driveLetterService ?? throw new ArgumentNullException(nameof(driveLetterService));
+
+        if (configuration?.Value is not { } config)
+        {
+            throw new ArgumentNullException(nameof(configuration));
+        }
+
+        _reconcileUncCheckTimeoutMs = Math.Clamp(
+            config.MountOperations.ReconcileUncAccessibilityTimeoutMs,
+            500,
+            10000);
+
+        var configuredPath = stateFilePath ?? config.History.StateFilePath;
+        _stateFilePath = !string.IsNullOrEmpty(configuredPath)
+            ? configuredPath
+            : GetDefaultStateFilePath();
 
         // Ensure directory exists
         var directory = Path.GetDirectoryName(_stateFilePath);
@@ -46,6 +72,8 @@ public class MountStateService : IMountStateService
 
     public async Task<IReadOnlyList<ActiveMount>> GetActiveMountsAsync()
     {
+        if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
+
         await _fileLock.WaitAsync();
         try
         {
@@ -60,6 +88,8 @@ public class MountStateService : IMountStateService
 
     public async Task RegisterMountAsync(ActiveMount mount)
     {
+        if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
+
         if (mount == null) throw new ArgumentNullException(nameof(mount));
 
         await _fileLock.WaitAsync();
@@ -70,17 +100,29 @@ public class MountStateService : IMountStateService
             // Remove any existing mount for this disk
             mounts.RemoveAll(m => m.DiskIndex == mount.DiskIndex);
 
+            // Create a copy of the mount with timestamps and verification status
+            var mountCopy = new ActiveMount
+            {
+                Id = mount.Id,
+                DiskIndex = mount.DiskIndex,
+                PartitionNumber = mount.PartitionNumber,
+                DriveLetter = mount.DriveLetter,
+                DistroName = mount.DistroName,
+                MountPathLinux = mount.MountPathLinux,
+                MountPathUNC = mount.MountPathUNC,
+                MountedAt = DateTime.Now,
+                IsVerified = true,
+                LastVerified = DateTime.Now
+            };
+
             // Add new mount
-            mount.MountedAt = DateTime.Now;
-            mount.IsVerified = true;
-            mount.LastVerified = DateTime.Now;
-            mounts.Add(mount);
+            mounts.Add(mountCopy);
 
             await SaveMountsInternalAsync(mounts);
 
             _logger.LogInformation(
                 "Registered mount: Disk {DiskIndex} -> Drive {DriveLetter}: ({UNC})",
-                mount.DiskIndex, mount.DriveLetter, mount.MountPathUNC);
+                mountCopy.DiskIndex, mountCopy.DriveLetter, mountCopy.MountPathUNC);
         }
         finally
         {
@@ -90,6 +132,8 @@ public class MountStateService : IMountStateService
 
     public async Task UnregisterMountAsync(int diskIndex)
     {
+        if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
+
         await _fileLock.WaitAsync();
         try
         {
@@ -110,6 +154,8 @@ public class MountStateService : IMountStateService
 
     public async Task<ActiveMount?> GetMountForDiskAsync(int diskIndex)
     {
+        if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
+
         await _fileLock.WaitAsync();
         try
         {
@@ -124,6 +170,8 @@ public class MountStateService : IMountStateService
 
     public async Task<ActiveMount?> GetMountForDriveLetterAsync(char driveLetter)
     {
+        if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
+
         await _fileLock.WaitAsync();
         try
         {
@@ -139,44 +187,65 @@ public class MountStateService : IMountStateService
 
     public async Task<bool> IsDiskMountedAsync(int diskIndex)
     {
+        if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
+
         var mount = await GetMountForDiskAsync(diskIndex);
         return mount != null;
     }
 
     public async Task<bool> IsDriveLetterInUseAsync(char driveLetter)
     {
+        if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
+
         var mount = await GetMountForDriveLetterAsync(driveLetter);
         return mount != null;
     }
 
     public async Task<IReadOnlyList<ActiveMount>> ReconcileMountStateAsync()
     {
+        if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
+
         await _fileLock.WaitAsync();
         try
         {
             var mounts = await LoadMountsInternalAsync();
             var orphanedMounts = new List<ActiveMount>();
 
+            var usedDriveLetters = new HashSet<char>(_driveLetterService.GetUsedLetters()
+                .Select(char.ToUpperInvariant));
+
             foreach (var mount in mounts.ToList())
             {
-                // Check if UNC path still exists
-                var stillExists = !string.IsNullOrEmpty(mount.MountPathUNC) &&
-                                  Directory.Exists(mount.MountPathUNC);
+                var normalizedLetter = char.ToUpperInvariant(mount.DriveLetter);
+                var hasValidLetter = normalizedLetter >= 'A' && normalizedLetter <= 'Z';
+                var driveStillMapped = hasValidLetter && usedDriveLetters.Contains(normalizedLetter);
 
-                if (!stillExists)
+                if (!driveStillMapped)
                 {
                     _logger.LogWarning(
-                        "Found orphaned mount: Disk {DiskIndex} -> Drive {DriveLetter}: (UNC path no longer exists)",
+                        "Found orphaned mount: Disk {DiskIndex} -> Drive {DriveLetter}: (drive letter no longer mapped)",
                         mount.DiskIndex, mount.DriveLetter);
 
                     orphanedMounts.Add(mount);
                     mounts.Remove(mount);
+                    continue;
                 }
-                else
+
+                if (!string.IsNullOrEmpty(mount.MountPathUNC))
                 {
-                    mount.IsVerified = true;
-                    mount.LastVerified = DateTime.Now;
+                    var accessible = await TryVerifyUncAccessibilityAsync(mount.MountPathUNC);
+                    if (!accessible)
+                    {
+                        _logger.LogWarning(
+                            "UNC path {UNC} for Disk {DiskIndex} is temporarily inaccessible; drive {DriveLetter} is still mapped.",
+                            mount.MountPathUNC,
+                            mount.DiskIndex,
+                            mount.DriveLetter);
+                    }
                 }
+
+                mount.IsVerified = true;
+                mount.LastVerified = DateTime.Now;
             }
 
             if (orphanedMounts.Count > 0)
@@ -195,6 +264,8 @@ public class MountStateService : IMountStateService
 
     public async Task ClearAllMountsAsync()
     {
+        if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
+
         await _fileLock.WaitAsync();
         try
         {
@@ -264,6 +335,56 @@ public class MountStateService : IMountStateService
         {
             _logger.LogError(ex, "Failed to save state file due to permissions");
             throw; // Re-throw for save operations as the caller should handle the failure
+        }
+    }
+
+    private async Task<bool> TryVerifyUncAccessibilityAsync(string uncPath)
+    {
+        try
+        {
+            var checkTask = Task.Run(() => Directory.Exists(uncPath));
+            var completedTask = await Task.WhenAny(checkTask, Task.Delay(_reconcileUncCheckTimeoutMs));
+            if (completedTask == checkTask)
+            {
+                return checkTask.Result;
+            }
+
+            _logger.LogWarning(
+                "UNC verification for {UNC} timed out after {TimeoutMs}ms",
+                uncPath,
+                _reconcileUncCheckTimeoutMs);
+
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Failed to verify UNC accessibility for {UNC}", uncPath);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Disposes the service and releases managed resources.
+    /// </summary>
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Disposes the service and releases managed resources.
+    /// </summary>
+    /// <param name="disposing">True if called from Dispose(), false if called from finalizer.</param>
+    protected virtual void Dispose(bool disposing)
+    {
+        if (!_disposed)
+        {
+            if (disposing)
+            {
+                _fileLock?.Dispose();
+            }
+            _disposed = true;
         }
     }
 }
