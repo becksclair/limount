@@ -44,6 +44,7 @@ dotnet test LiMount.Tests
 - **Output**: Scripts use `key=value` format.
 
 ## Key Services
+
 | Service | Purpose | Lifetime |
 |---------|---------|----------|
 | `IMountStateService` | Track active mounts (Persisted) | Singleton |
