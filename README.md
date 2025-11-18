@@ -70,11 +70,12 @@ limount/
     ├── Map-WSLShareToDrive.ps1      # Non-elevated: Drive mapping script
     ├── Unmount-LinuxDisk.ps1        # Elevated: WSL unmount script
     └── Unmap-DriveLetter.ps1        # Non-elevated: Drive unmapping script
-```text
+```
 
 ## Building the Application
 
 ### Prerequisites
+
 1. Install [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
 2. Ensure WSL2 is installed and configured on your Windows system
 
