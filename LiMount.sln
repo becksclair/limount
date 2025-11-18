@@ -1,0 +1,25 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LiMount.Core", "LiMount.Core\LiMount.Core.csproj", "{8B9C5E5A-1B2D-4E8F-9A3C-7D6E4F5A8B9C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LiMount.App", "LiMount.App\LiMount.App.csproj", "{9C8D6F7B-2C3E-5F9A-0B4D-8E7F5A6B9D0E}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8B9C5E5A-1B2D-4E8F-9A3C-7D6E4F5A8B9C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8B9C5E5A-1B2D-4E8F-9A3C-7D6E4F5A8B9C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8B9C5E5A-1B2D-4E8F-9A3C-7D6E4F5A8B9C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8B9C5E5A-1B2D-4E8F-9A3C-7D6E4F5A8B9C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9C8D6F7B-2C3E-5F9A-0B4D-8E7F5A6B9D0E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9C8D6F7B-2C3E-5F9A-0B4D-8E7F5A6B9D0E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9C8D6F7B-2C3E-5F9A-0B4D-8E7F5A6B9D0E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9C8D6F7B-2C3E-5F9A-0B4D-8E7F5A6B9D0E}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,324 @@
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Windows;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using LiMount.Core.Interfaces;
+using LiMount.Core.Models;
+using LiMount.Core.Services;
+
+namespace LiMount.App.ViewModels;
+
+/// <summary>
+/// Main ViewModel for the LiMount application.
+/// Handles disk enumeration, partition selection, and mounting operations.
+/// Uses CommunityToolkit.Mvvm for MVVM pattern support.
+/// </summary>
+public partial class MainViewModel : ObservableObject
+{
+    private readonly IDiskEnumerationService _diskService;
+    private readonly IDriveLetterService _driveLetterService;
+    private readonly IMountOrchestrator _mountOrchestrator;
+
+    [ObservableProperty]
+    private ObservableCollection<DiskInfo> _disks = new();
+
+    [ObservableProperty]
+    private DiskInfo? _selectedDisk;
+
+    [ObservableProperty]
+    private ObservableCollection<PartitionInfo> _partitions = new();
+
+    [ObservableProperty]
+    private PartitionInfo? _selectedPartition;
+
+    [ObservableProperty]
+    private ObservableCollection<char> _freeDriveLetters = new();
+
+    [ObservableProperty]
+    private char? _selectedDriveLetter;
+
+    [ObservableProperty]
+    private string _selectedFsType = "ext4";
+
+    [ObservableProperty]
+    private string _statusMessage = "Ready. Select a disk, partition, and drive letter, then click Mount.";
+
+    [ObservableProperty]
+    private bool _isBusy;
+
+    [ObservableProperty]
+    private bool _canOpenExplorer;
+
+    private string? _lastMappedDriveLetter;
+
+    /// <summary>
+    /// Initializes a new instance of MainViewModel and configures it with the provided services; subscribes to property changes so partitions are updated when SelectedDisk changes.
+    /// </summary>
+    /// <param name="diskService">Service used to enumerate candidate disks and their partitions.</param>
+    /// <param name="driveLetterService">Service used to obtain available drive letters.</param>
+    /// <param name="mountOrchestrator">Service used to orchestrate mounting and mapping operations.</param>
+    public MainViewModel(
+        IDiskEnumerationService diskService,
+        IDriveLetterService driveLetterService,
+        IMountOrchestrator mountOrchestrator)
+    {
+        _diskService = diskService;
+        _driveLetterService = driveLetterService;
+        _mountOrchestrator = mountOrchestrator;
+
+        PropertyChanged += OnPropertyChanged;
+    }
+
+    /// <summary>
+    /// Responds to property-change notifications and updates the partition list when <c>SelectedDisk</c> changes.
+    /// </summary>
+    /// <param name="sender">The source of the property change notification.</param>
+    /// <param name="e">The <see cref="PropertyChangedEventArgs"/> identifying the changed property.</param>
+    private void OnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(SelectedDisk))
+        {
+            UpdatePartitions();
+        }
+    }
+
+    /// <summary>
+    /// Loads disks and drive letters from the system.
+    /// Refreshes the available disks, partitions, and free drive letters.
+    /// </summary>
+    [RelayCommand]
+    private async Task RefreshAsync()
+    {
+        await LoadDisksAndDriveLetters();
+    }
+
+    /// <summary>
+    /// Initializes the ViewModel by loading disks and drive letters asynchronously.
+    /// Call this after instantiation to perform heavy I/O operations.
+    /// </summary>
+    /// <param name="cancellationToken">Token to cancel initialization if the window closes.</param>
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        StatusMessage = "Loading disks and drive letters...";
+
+        // Run data retrieval on background thread
+        var data = await Task.Run(GetDisksAndDriveLettersData);
+
+        // Update UI on UI thread
+        await Application.Current.Dispatcher.InvokeAsync(() => UpdateUIWithData(data));
+    }
+
+    /// <summary>
+    /// Loads candidate (non-system, non-boot) disks and available drive letters, populates the corresponding collections, and auto-selects defaults when available.
+    /// </summary>
+    /// <remarks>
+    /// Updates the Disks and FreeDriveLetters collections, may set SelectedDisk and SelectedDriveLetter if they are not already set, and writes progress or error text to StatusMessage.
+    /// </remarks>
+    private async Task LoadDisksAndDriveLetters()
+    {
+        try
+        {
+            StatusMessage = "Loading disks and drive letters...";
+
+            // Get data on background thread
+            var data = await Task.Run(GetDisksAndDriveLettersData);
+
+            // Update UI on UI thread
+            UpdateUIWithData(data);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Error loading disks: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Retrieves disks and drive letters data without touching UI components.
+    /// This method is safe to call from any thread.
+    /// </summary>
+    /// <returns>Tuple containing candidate disks and free drive letters</returns>
+    private (IEnumerable<DiskInfo> candidateDisks, IEnumerable<DriveLetterInfo> freeLetters) GetDisksAndDriveLettersData()
+    {
+        // Get candidate disks (non-system, non-boot)
+        var candidateDisks = _diskService.GetCandidateDisks();
+
+        // Get free drive letters (sorted Z→A) and convert to DriveLetterInfo objects
+        var freeLetters = _driveLetterService.GetFreeLetters()
+            .Select(letter => new DriveLetterInfo { Letter = letter, IsInUse = false });
+
+        return (candidateDisks, freeLetters);
+    }
+
+    /// <summary>
+    /// Updates UI collections and properties with the provided data.
+    /// This method must be called on the UI thread.
+    /// </summary>
+    private void UpdateUIWithData((IEnumerable<DiskInfo> candidateDisks, IEnumerable<DriveLetterInfo> freeLetters) data)
+    {
+        var (candidateDisks, freeLetters) = data;
+
+        Disks.Clear();
+        foreach (var disk in candidateDisks)
+        {
+            Disks.Add(disk);
+        }
+
+        FreeDriveLetters.Clear();
+        foreach (var letter in freeLetters)
+        {
+            FreeDriveLetters.Add(letter.Letter);
+        }
+
+        // Auto-select first disk and drive letter if available
+        if (Disks.Count > 0 && SelectedDisk == null)
+        {
+            SelectedDisk = Disks[0];
+        }
+
+        if (FreeDriveLetters.Count > 0 && SelectedDriveLetter == null)
+        {
+            SelectedDriveLetter = FreeDriveLetters[0];
+        }
+
+        StatusMessage = $"Found {Disks.Count} candidate disk(s) and {FreeDriveLetters.Count} free drive letter(s).";
+    }
+
+    /// <summary>
+    /// Populates the Partitions collection with partitions from SelectedDisk that are likely Linux partitions and auto-selects the first one if present.
+    /// </summary>
+    /// <remarks>
+    /// Clears any existing entries in Partitions. If SelectedDisk is null, the method returns without modifying Partitions or SelectedPartition.
+    /// After filtering, SelectedPartition is set to the first partition in the collection or to null if no partitions matched.
+    /// </remarks>
+    private void UpdatePartitions()
+    {
+        Partitions.Clear();
+
+        if (SelectedDisk == null)
+        {
+            return;
+        }
+
+        // Filter partitions to only show likely Linux partitions
+        var linuxPartitions = SelectedDisk.Partitions
+            .Where(p => p.IsLikelyLinux)
+            .ToList();
+
+        foreach (var partition in linuxPartitions)
+        {
+            Partitions.Add(partition);
+        }
+
+        // Auto-select first partition if available
+        if (Partitions.Count > 0)
+        {
+            SelectedPartition = Partitions[0];
+        }
+        else
+        {
+            SelectedPartition = null;
+        }
+    }
+
+    /// <summary>
+    /// Mounts the selected disk partition into WSL2 and maps it to a Windows drive letter.
+    /// Mounts the selected partition into WSL using an elevated PowerShell script, maps the resulting UNC path to the chosen Windows drive letter, and updates the view model's status, busy state, and explorer availability based on the outcome.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanMount))]
+    private async Task MountAsync()
+    {
+        if (SelectedDisk == null || SelectedPartition == null || SelectedDriveLetter == null)
+        {
+            StatusMessage = "Please select a disk, partition, and drive letter.";
+            return;
+        }
+
+        IsBusy = true;
+        CanOpenExplorer = false;
+
+        try
+        {
+            var progress = new Progress<string>(msg => StatusMessage = msg);
+
+            var result = await _mountOrchestrator.MountAndMapAsync(
+                SelectedDisk.Index,
+                SelectedPartition.PartitionNumber,
+                SelectedDriveLetter.Value,
+                SelectedFsType,
+                null,
+                progress);
+
+            if (!result.Success)
+            {
+                StatusMessage = result.ErrorMessage ?? "Mount and map operation failed.";
+                return;
+            }
+
+            // Success!
+            _lastMappedDriveLetter = SelectedDriveLetter.ToString();
+            CanOpenExplorer = true;
+
+            StatusMessage = $"Success! Mounted as {SelectedDriveLetter}: - You can now access the Linux partition from Windows Explorer.";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Determines whether the mount command can be executed given the current state.
+    /// </summary>
+    /// <returns>`true` if the view model is not busy and a disk, a partition, and a drive letter are all selected; `false` otherwise.</returns>
+    private bool CanMount()
+    {
+        return !IsBusy &&
+               SelectedDisk != null &&
+               SelectedPartition != null &&
+               SelectedDriveLetter != null;
+    }
+
+    /// <summary>
+    /// Opens Windows Explorer to the mapped drive letter.
+    /// Opens Windows Explorer at the last mapped drive letter, if a drive has been mapped.
+    /// </summary>
+    /// <remarks>
+    /// If no drive has been mapped this method does nothing. On failure it sets <see cref="StatusMessage"/> with the error message.
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(CanOpenExplorerExecute))]
+    private void OpenExplorer()
+    {
+        if (string.IsNullOrEmpty(_lastMappedDriveLetter))
+        {
+            return;
+        }
+
+        try
+        {
+            var drivePath = $"{_lastMappedDriveLetter}:\\";
+            Process.Start("explorer.exe", drivePath);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Failed to open Explorer: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Checks whether Explorer can be opened for the last mapped drive letter.
+    /// </summary>
+    /// <returns>`true` if Explorer is enabled and a previously mapped drive letter is available, `false` otherwise.</returns>
+    private bool CanOpenExplorerExecute()
+    {
+        return CanOpenExplorer && !string.IsNullOrEmpty(_lastMappedDriveLetter);
+    }
+
+    }
