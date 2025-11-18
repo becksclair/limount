@@ -9,6 +9,21 @@ namespace LiMount.App;
 /// </summary>
 public partial class MainWindow : Window
 {
+    /// <summary>
+    /// Maximum number of retry attempts for ViewModel initialization.
+    /// </summary>
+    private const int InitializationMaxRetries = 2;
+
+    /// <summary>
+    /// Base delay in milliseconds for exponential backoff during initialization retries.
+    /// </summary>
+    private const int InitializationBaseDelayMs = 1000;
+
+    /// <summary>
+    /// Maximum delay in milliseconds for exponential backoff during initialization retries.
+    /// </summary>
+    private const int InitializationMaxDelayMs = 10000;
+
     private readonly ILogger<MainWindow> _logger;
     private readonly CancellationTokenSource _cancellationTokenSource = new();
 
@@ -58,13 +73,10 @@ public partial class MainWindow : Window
     /// <param name="cancellationToken">Token to cancel initialization if the window closes.</param>
     private async Task InitializeViewModelAsync(MainViewModel viewModel, CancellationToken cancellationToken)
     {
-        const int maxRetries = 2;
-        const int baseDelayMs = 1000;
-        const int maxDelayMs = 10000;
         int retryCount = 0;
         bool extraRetryUsed = false;
 
-        while (retryCount <= maxRetries && !cancellationToken.IsCancellationRequested)
+        while (retryCount <= InitializationMaxRetries && !cancellationToken.IsCancellationRequested)
         {
             try
             {
@@ -84,9 +96,9 @@ public partial class MainWindow : Window
                     return;
                 }
 
-                _logger.LogError(ex, "Failed to initialize ViewModel (attempt {Attempt}/{MaxAttempts})", retryCount + 1, maxRetries + 1);
+                _logger.LogError(ex, "Failed to initialize ViewModel (attempt {Attempt}/{MaxAttempts})", retryCount + 1, InitializationMaxRetries + 1);
 
-                if (retryCount == maxRetries)
+                if (retryCount == InitializationMaxRetries)
                 {
                     // Final attempt failed - show error dialog and disable UI
                     if (cancellationToken.IsCancellationRequested)
@@ -106,7 +118,7 @@ public partial class MainWindow : Window
                     {
                         extraRetryUsed = true;
                         // Apply exponential backoff delay before final retry
-                        var delay = Math.Min(baseDelayMs * (int)Math.Pow(2, retryCount), maxDelayMs);
+                        var delay = Math.Min(InitializationBaseDelayMs * (int)Math.Pow(2, retryCount), InitializationMaxDelayMs);
                         await Task.Delay(delay, cancellationToken);
                         continue;
                     }
@@ -123,7 +135,7 @@ public partial class MainWindow : Window
                 }
 
                 var retryResult = MessageBox.Show(
-                    $"Initialization failed (attempt {retryCount + 1} of {maxRetries + 1}).\n\n" +
+                    $"Initialization failed (attempt {retryCount + 1} of {InitializationMaxRetries + 1}).\n\n" +
                     $"Error: {ex.Message}\n\n" +
                     "Would you like to retry?",
                     "Initialization Failed",
@@ -137,7 +149,7 @@ public partial class MainWindow : Window
                 }
 
                 // Apply exponential backoff delay before retry
-                var retryDelay = Math.Min(baseDelayMs * (int)Math.Pow(2, retryCount), maxDelayMs);
+                var retryDelay = Math.Min(InitializationBaseDelayMs * (int)Math.Pow(2, retryCount), InitializationMaxDelayMs);
                 await Task.Delay(retryDelay, cancellationToken);
             }
 

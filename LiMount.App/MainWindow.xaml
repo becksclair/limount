@@ -148,6 +148,7 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
             <!-- Refresh Button -->
@@ -175,7 +176,17 @@
                     Content="Mount"
                     Style="{StaticResource ModernButton}"
                     Command="{Binding MountCommand}"
-                    Width="120"/>
+                    Width="120"
+                    Margin="0,0,8,0"/>
+
+            <!-- Unmount Button -->
+            <Button Grid.Column="4"
+                    x:Name="UnmountButton"
+                    Content="Unmount"
+                    Style="{StaticResource SecondaryButton}"
+                    Command="{Binding UnmountCommand}"
+                    Width="120"
+                    Visibility="{Binding IsMounted, Converter={StaticResource BooleanToVisibilityConverter}}"/>
         </Grid>
     </Grid>
 </Window>

@@ -94,6 +94,7 @@ public partial class App : Application
         services.AddSingleton<IDiskEnumerationService, DiskEnumerationService>();
         services.AddSingleton<IDriveLetterService, DriveLetterService>();
         services.AddSingleton<IScriptExecutor, ScriptExecutor>();
+        services.AddSingleton<IMountHistoryService, MountHistoryService>();
 
         // Register orchestrators
         services.AddTransient<IMountOrchestrator, MountOrchestrator>();

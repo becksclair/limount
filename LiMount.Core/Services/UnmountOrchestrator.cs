@@ -11,15 +11,18 @@ namespace LiMount.Core.Services;
 public class UnmountOrchestrator : IUnmountOrchestrator
 {
     private readonly IScriptExecutor _scriptExecutor;
+    private readonly IMountHistoryService? _historyService;
 
     /// <summary>
     /// Initializes a new instance of UnmountOrchestrator with the provided script executor.
     /// </summary>
     /// <param name="scriptExecutor">The executor used to run unmapping and unmounting scripts; must not be null.</param>
+    /// <param name="historyService">Optional history service for tracking unmount operations.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="scriptExecutor"/> is null.</exception>
-    public UnmountOrchestrator(IScriptExecutor scriptExecutor)
+    public UnmountOrchestrator(IScriptExecutor scriptExecutor, IMountHistoryService? historyService = null)
     {
         _scriptExecutor = scriptExecutor ?? throw new ArgumentNullException(nameof(scriptExecutor));
+        _historyService = historyService;
     }
 
     /// <summary>
@@ -34,8 +37,16 @@ public class UnmountOrchestrator : IUnmountOrchestrator
         char? driveLetter = null,
         IProgress<string>? progress = null)
     {
+        // Validate parameters
         if (diskIndex < 0)
-            throw new ArgumentOutOfRangeException(nameof(diskIndex), "Disk index must be greater than or equal to 0.");
+        {
+            return UnmountAndUnmapResult.CreateFailure(diskIndex, "Disk index must be non-negative", "validation");
+        }
+
+        if (driveLetter.HasValue && !char.IsLetter(driveLetter.Value))
+        {
+            return UnmountAndUnmapResult.CreateFailure(diskIndex, "Drive letter must be a valid letter (A-Z)", "validation");
+        }
 
         progress?.Report($"Starting unmount operation for disk {diskIndex}...");
 
@@ -67,16 +78,34 @@ public class UnmountOrchestrator : IUnmountOrchestrator
         if (!unmountResult.Success)
         {
             progress?.Report($"Unmount failed: {unmountResult.ErrorMessage}");
-            return UnmountAndUnmapResult.CreateFailure(
+            var failureResult = UnmountAndUnmapResult.CreateFailure(
                 diskIndex,
                 unmountResult.ErrorMessage ?? "Unknown error during unmount",
                 "unmount");
+
+            // Log failure to history
+            if (_historyService != null)
+            {
+                var historyEntry = MountHistoryEntry.FromUnmountResult(failureResult);
+                await _historyService.AddEntryAsync(historyEntry);
+            }
+
+            return failureResult;
         }
 
         progress?.Report("Disk unmounted successfully from WSL");
 
-        // Return success
-        return UnmountAndUnmapResult.CreateSuccess(diskIndex, 
+        // Create success result
+        var result = UnmountAndUnmapResult.CreateSuccess(diskIndex,
             string.IsNullOrEmpty(unmappedDriveLetter) ? null : unmappedDriveLetter[0]);
+
+        // Log to history
+        if (_historyService != null)
+        {
+            var historyEntry = MountHistoryEntry.FromUnmountResult(result);
+            await _historyService.AddEntryAsync(historyEntry);
+        }
+
+        return result;
     }
 }

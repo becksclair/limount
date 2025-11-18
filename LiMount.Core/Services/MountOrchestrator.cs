@@ -11,15 +11,29 @@ namespace LiMount.Core.Services;
 [SupportedOSPlatform("windows")]
 public class MountOrchestrator : IMountOrchestrator
 {
+    /// <summary>
+    /// Maximum number of retry attempts when verifying UNC path accessibility.
+    /// </summary>
+    private const int UncAccessibilityRetries = 5;
+
+    /// <summary>
+    /// Delay in milliseconds between UNC accessibility retry attempts.
+    /// </summary>
+    private const int UncAccessibilityDelayMs = 500;
+
     private readonly IScriptExecutor _scriptExecutor;
+    private readonly IMountHistoryService? _historyService;
 
     /// <summary>
     /// Initializes a new instance of <see cref="MountOrchestrator"/> using the provided script executor.
     /// </summary>
+    /// <param name="scriptExecutor">The script executor for running PowerShell scripts.</param>
+    /// <param name="historyService">Optional history service for tracking mount operations.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="scriptExecutor"/> is null.</exception>
-    public MountOrchestrator(IScriptExecutor scriptExecutor)
+    public MountOrchestrator(IScriptExecutor scriptExecutor, IMountHistoryService? historyService = null)
     {
         _scriptExecutor = scriptExecutor ?? throw new ArgumentNullException(nameof(scriptExecutor));
+        _historyService = historyService;
     }
 
     /// <summary>
@@ -42,6 +56,27 @@ public class MountOrchestrator : IMountOrchestrator
         string? distroName = null,
         IProgress<string>? progress = null)
     {
+        // Validate parameters
+        if (diskIndex < 0)
+        {
+            return MountAndMapResult.CreateFailure(diskIndex, partition, "Disk index must be non-negative", "validation");
+        }
+
+        if (partition < 1)
+        {
+            return MountAndMapResult.CreateFailure(diskIndex, partition, "Partition number must be greater than 0", "validation");
+        }
+
+        if (!char.IsLetter(driveLetter))
+        {
+            return MountAndMapResult.CreateFailure(diskIndex, partition, "Drive letter must be a valid letter (A-Z)", "validation");
+        }
+
+        if (string.IsNullOrWhiteSpace(fsType))
+        {
+            return MountAndMapResult.CreateFailure(diskIndex, partition, "Filesystem type cannot be empty", "validation");
+        }
+
         progress?.Report($"Starting mount operation for disk {diskIndex} partition {partition}...");
 
         // Step 1: Mount disk in WSL
@@ -56,11 +91,20 @@ public class MountOrchestrator : IMountOrchestrator
         if (!mountResult.Success)
         {
             progress?.Report($"Mount failed: {mountResult.ErrorMessage}");
-            return MountAndMapResult.CreateFailure(
+            var failureResult = MountAndMapResult.CreateFailure(
                 diskIndex,
                 partition,
                 mountResult.ErrorMessage ?? "Unknown error during mount",
                 "mount");
+
+            // Log failure to history
+            if (_historyService != null)
+            {
+                var historyEntry = MountHistoryEntry.FromMountResult(failureResult);
+                await _historyService.AddEntryAsync(historyEntry);
+            }
+
+            return failureResult;
         }
 
         progress?.Report($"Disk mounted successfully at {mountResult.MountPathLinux}");
@@ -72,14 +116,14 @@ public class MountOrchestrator : IMountOrchestrator
             progress?.Report("Verifying WSL share accessibility...");
 
             bool uncAccessible = false;
-            for (int i = 0; i < 5; i++)
+            for (int i = 0; i < UncAccessibilityRetries; i++)
             {
                 if (Directory.Exists(uncPath))
                 {
                     uncAccessible = true;
                     break;
                 }
-                await Task.Delay(500);
+                await Task.Delay(UncAccessibilityDelayMs);
             }
 
             if (!uncAccessible)
@@ -98,22 +142,40 @@ public class MountOrchestrator : IMountOrchestrator
         if (!mappingResult.Success)
         {
             progress?.Report($"Drive mapping failed: {mappingResult.ErrorMessage}");
-            return MountAndMapResult.CreateFailure(
+            var failureResult = MountAndMapResult.CreateFailure(
                 diskIndex,
                 partition,
                 mappingResult.ErrorMessage ?? "Unknown error during mapping",
                 "map");
+
+            // Log failure to history
+            if (_historyService != null)
+            {
+                var historyEntry = MountHistoryEntry.FromMountResult(failureResult);
+                await _historyService.AddEntryAsync(historyEntry);
+            }
+
+            return failureResult;
         }
 
         progress?.Report($"Successfully mapped as {driveLetter}:");
 
-        // Return success
-        return MountAndMapResult.CreateSuccess(
+        // Create success result
+        var result = MountAndMapResult.CreateSuccess(
             diskIndex,
             partition,
             driveLetter,
             mountResult.DistroName ?? "Unknown",
             mountResult.MountPathLinux ?? string.Empty,
             mountResult.MountPathUNC ?? string.Empty);
+
+        // Log to history
+        if (_historyService != null)
+        {
+            var historyEntry = MountHistoryEntry.FromMountResult(result);
+            await _historyService.AddEntryAsync(historyEntry);
+        }
+
+        return result;
     }
 }

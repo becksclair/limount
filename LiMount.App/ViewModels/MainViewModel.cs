@@ -6,6 +6,7 @@ using System.Linq;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
 using LiMount.Core.Services;
@@ -22,6 +23,8 @@ public partial class MainViewModel : ObservableObject
     private readonly IDiskEnumerationService _diskService;
     private readonly IDriveLetterService _driveLetterService;
     private readonly IMountOrchestrator _mountOrchestrator;
+    private readonly IUnmountOrchestrator _unmountOrchestrator;
+    private readonly ILogger<MainViewModel> _logger;
 
     [ObservableProperty]
     private ObservableCollection<DiskInfo> _disks = new();
@@ -56,19 +59,56 @@ public partial class MainViewModel : ObservableObject
     private string? _lastMappedDriveLetter;
 
     /// <summary>
+    /// The disk index of the currently mounted disk, or null if nothing is mounted.
+    /// </summary>
+    [ObservableProperty]
+    private int? _currentMountedDiskIndex;
+
+    /// <summary>
+    /// The partition number of the currently mounted partition, or null if nothing is mounted.
+    /// </summary>
+    [ObservableProperty]
+    private int? _currentMountedPartition;
+
+    /// <summary>
+    /// The drive letter of the currently mounted partition, or null if nothing is mounted.
+    /// </summary>
+    [ObservableProperty]
+    private char? _currentMountedDriveLetter;
+
+    /// <summary>
+    /// Gets whether a disk is currently mounted.
+    /// </summary>
+    public bool IsMounted => CurrentMountedDiskIndex.HasValue;
+
+    /// <summary>
+    /// Called when CurrentMountedDiskIndex changes to notify IsMounted property.
+    /// </summary>
+    partial void OnCurrentMountedDiskIndexChanged(int? value)
+    {
+        OnPropertyChanged(nameof(IsMounted));
+    }
+
+    /// <summary>
     /// Initializes a new instance of MainViewModel and configures it with the provided services; subscribes to property changes so partitions are updated when SelectedDisk changes.
     /// </summary>
     /// <param name="diskService">Service used to enumerate candidate disks and their partitions.</param>
     /// <param name="driveLetterService">Service used to obtain available drive letters.</param>
     /// <param name="mountOrchestrator">Service used to orchestrate mounting and mapping operations.</param>
+    /// <param name="unmountOrchestrator">Service used to orchestrate unmounting and unmapping operations.</param>
+    /// <param name="logger">Logger for diagnostic information.</param>
     public MainViewModel(
         IDiskEnumerationService diskService,
         IDriveLetterService driveLetterService,
-        IMountOrchestrator mountOrchestrator)
+        IMountOrchestrator mountOrchestrator,
+        IUnmountOrchestrator unmountOrchestrator,
+        ILogger<MainViewModel> logger)
     {
         _diskService = diskService;
         _driveLetterService = driveLetterService;
         _mountOrchestrator = mountOrchestrator;
+        _unmountOrchestrator = unmountOrchestrator;
+        _logger = logger;
 
         PropertyChanged += OnPropertyChanged;
     }
@@ -132,6 +172,7 @@ public partial class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Failed to load disks and drive letters");
             StatusMessage = $"Error loading disks: {ex.Message}";
         }
     }
@@ -258,14 +299,18 @@ public partial class MainViewModel : ObservableObject
                 return;
             }
 
-            // Success!
+            // Success! Track the mount state
             _lastMappedDriveLetter = SelectedDriveLetter.ToString();
+            CurrentMountedDiskIndex = SelectedDisk.Index;
+            CurrentMountedPartition = SelectedPartition.PartitionNumber;
+            CurrentMountedDriveLetter = SelectedDriveLetter.Value;
             CanOpenExplorer = true;
 
             StatusMessage = $"Success! Mounted as {SelectedDriveLetter}: - You can now access the Linux partition from Windows Explorer.";
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Mount operation failed for disk {DiskIndex} partition {Partition}", SelectedDisk?.Index, SelectedPartition?.PartitionNumber);
             StatusMessage = $"Error: {ex.Message}";
         }
         finally
@@ -319,6 +364,77 @@ public partial class MainViewModel : ObservableObject
     private bool CanOpenExplorerExecute()
     {
         return CanOpenExplorer && !string.IsNullOrEmpty(_lastMappedDriveLetter);
+    }
+
+    /// <summary>
+    /// Unmounts the currently mounted disk from WSL2 and unmaps the Windows drive letter.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanUnmount))]
+    private async Task UnmountAsync()
+    {
+        if (!CurrentMountedDiskIndex.HasValue)
+        {
+            StatusMessage = "No disk is currently mounted.";
+            return;
+        }
+
+        // Ask for confirmation
+        var result = MessageBox.Show(
+            $"Are you sure you want to unmount disk {CurrentMountedDiskIndex} (Drive {CurrentMountedDriveLetter}:)?\n\n" +
+            "Make sure you have saved and closed any files on this drive before unmounting.",
+            "Confirm Unmount",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+
+        if (result != MessageBoxResult.Yes)
+        {
+            StatusMessage = "Unmount cancelled.";
+            return;
+        }
+
+        IsBusy = true;
+
+        try
+        {
+            var progress = new Progress<string>(msg => StatusMessage = msg);
+
+            var unmountResult = await _unmountOrchestrator.UnmountAndUnmapAsync(
+                CurrentMountedDiskIndex.Value,
+                CurrentMountedDriveLetter,
+                progress);
+
+            if (!unmountResult.Success)
+            {
+                StatusMessage = unmountResult.ErrorMessage ?? "Unmount operation failed.";
+                return;
+            }
+
+            // Success! Clear mount state
+            StatusMessage = $"Successfully unmounted disk {CurrentMountedDiskIndex}.";
+            CurrentMountedDiskIndex = null;
+            CurrentMountedPartition = null;
+            CurrentMountedDriveLetter = null;
+            _lastMappedDriveLetter = null;
+            CanOpenExplorer = false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unmount operation failed for disk {DiskIndex}", CurrentMountedDiskIndex);
+            StatusMessage = $"Error during unmount: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Determines whether the unmount command can be executed.
+    /// </summary>
+    /// <returns>`true` if not busy and a disk is currently mounted, `false` otherwise.</returns>
+    private bool CanUnmount()
+    {
+        return !IsBusy && IsMounted;
     }
 
     }
