@@ -27,6 +27,16 @@ public class MappingResult
     public string? ErrorMessage { get; set; }
 
     /// <summary>
+    /// Raw stdout output from the script execution.
+    /// </summary>
+    public string? RawOutput { get; set; }
+
+    /// <summary>
+    /// Raw stderr output from the script execution.
+    /// </summary>
+    public string? RawError { get; set; }
+
+    /// <summary>
     /// Creates a MappingResult from a dictionary of key-value pairs.
     /// Expected keys: STATUS, DriveLetter, MappedTo, ErrorMessage
     /// </summary>

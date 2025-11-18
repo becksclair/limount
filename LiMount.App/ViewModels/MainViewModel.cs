@@ -20,6 +20,7 @@ public partial class MainViewModel : ObservableObject
 {
     private readonly IDiskEnumerationService _diskService;
     private readonly IDriveLetterService _driveLetterService;
+    private readonly IScriptExecutor _scriptExecutor;
 
     [ObservableProperty]
     private ObservableCollection<DiskInfo> _disks = new();
@@ -53,10 +54,11 @@ public partial class MainViewModel : ObservableObject
 
     private string? _lastMappedDriveLetter;
 
-    public MainViewModel(IDiskEnumerationService diskService, IDriveLetterService driveLetterService)
+    public MainViewModel(IDiskEnumerationService diskService, IDriveLetterService driveLetterService, IScriptExecutor scriptExecutor)
     {
         _diskService = diskService;
         _driveLetterService = driveLetterService;
+        _scriptExecutor = scriptExecutor;
 
         // Subscribe to SelectedDisk changes to update partitions
         PropertyChanged += OnPropertyChanged;
@@ -197,7 +199,7 @@ public partial class MainViewModel : ObservableObject
             // Step 2: Map WSL UNC path to drive letter
             StatusMessage = $"Mapping {mountResult.MountPathUNC} to {SelectedDriveLetter}:...";
 
-            var mappingResult = await ExecuteMappingScriptAsync(
+            var mappingResult = await _scriptExecutor.ExecuteMappingScriptAsync(
                 SelectedDriveLetter.Value,
                 mountResult.MountPathUNC!);
 
@@ -349,81 +351,7 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>
-    /// Executes the Map-WSLShareToDrive.ps1 script (non-elevated).
-    /// </summary>
-    private async Task<MappingResult> ExecuteMappingScriptAsync(char driveLetter, string targetUNC)
-    {
-        var scriptPath = GetScriptPath("Map-WSLShareToDrive.ps1");
-
-        if (!File.Exists(scriptPath))
-        {
-            return new MappingResult
-            {
-                Success = false,
-                ErrorMessage = $"Mapping script not found at: {scriptPath}"
-            };
-        }
-
-        var arguments = $"-ExecutionPolicy Bypass -File \"{scriptPath}\" " +
-                       $"-DriveLetter {driveLetter} " +
-                       $"-TargetUNC \"{targetUNC}\"";
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "powershell.exe",
-            Arguments = arguments,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-
-        try
-        {
-            using var process = Process.Start(startInfo);
-            if (process == null)
-            {
-                return new MappingResult
-                {
-                    Success = false,
-                    ErrorMessage = "Failed to start PowerShell process."
-                };
-            }
-
-            var output = await process.StandardOutput.ReadToEndAsync();
-            var errorOutput = await process.StandardError.ReadToEndAsync();
-
-            await process.WaitForExitAsync();
-
-            var parsedValues = KeyValueOutputParser.Parse(output);
-            var result = MappingResult.FromDictionary(parsedValues);
-
-            // If parsing failed but exit code is 0, assume success
-            if (process.ExitCode == 0 && !result.Success && string.IsNullOrEmpty(result.ErrorMessage))
-            {
-                result.Success = true;
-                result.DriveLetter = driveLetter.ToString();
-                result.TargetUNC = targetUNC;
-            }
-
-            if (!result.Success && !string.IsNullOrEmpty(errorOutput))
-            {
-                result.ErrorMessage = $"{result.ErrorMessage}\n{errorOutput}";
-            }
-
-            return result;
-        }
-        catch (Exception ex)
-        {
-            return new MappingResult
-            {
-                Success = false,
-                ErrorMessage = $"Failed to execute mapping script: {ex.Message}"
-            };
-        }
-    }
-
+    
     private string GetScriptPath(string scriptFileName)
     {
         // Try to locate the script relative to the application directory

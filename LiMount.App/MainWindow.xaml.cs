@@ -104,8 +104,8 @@ public partial class MainWindow : Window
                 }
 
                 // Apply exponential backoff delay before retry
-                var delay = Math.Min(baseDelayMs * (int)Math.Pow(2, retryCount), maxDelayMs);
-                await Task.Delay(delay);
+                var retryDelay = Math.Min(baseDelayMs * (int)Math.Pow(2, retryCount), maxDelayMs);
+                await Task.Delay(retryDelay);
             }
 
             retryCount++;

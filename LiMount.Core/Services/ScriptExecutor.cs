@@ -63,9 +63,23 @@ public class ScriptExecutor : IScriptExecutor
         var arguments = $"-ExecutionPolicy Bypass -File \"{scriptPath}\" " +
                        $"-DriveLetter {driveLetter} -TargetUNC \"{targetUNC}\"";
 
-        var output = await ExecuteNonElevatedScriptAsync("powershell.exe", arguments);
+        var (output, error) = await ExecuteNonElevatedScriptAsync("powershell.exe", arguments);
         var parsedValues = KeyValueOutputParser.Parse(output);
-        return MappingResult.FromDictionary(parsedValues);
+        var result = MappingResult.FromDictionary(parsedValues);
+
+        // Include raw output for debugging and error handling
+        result.RawOutput = output;
+        result.RawError = error;
+
+        // If parsing failed but there's stderr output, include it in error message
+        if (!result.Success && !string.IsNullOrEmpty(error))
+        {
+            result.ErrorMessage = string.IsNullOrEmpty(result.ErrorMessage) 
+                ? error 
+                : $"{result.ErrorMessage}\n{error}";
+        }
+
+        return result;
     }
 
     public async Task<UnmountResult> ExecuteUnmountScriptAsync(int diskIndex)
@@ -101,7 +115,7 @@ public class ScriptExecutor : IScriptExecutor
 
         var arguments = $"-ExecutionPolicy Bypass -File \"{scriptPath}\" -DriveLetter {driveLetter}";
 
-        var output = await ExecuteNonElevatedScriptAsync("powershell.exe", arguments);
+        var (output, error) = await ExecuteNonElevatedScriptAsync("powershell.exe", arguments);
         var parsedValues = KeyValueOutputParser.Parse(output);
         return UnmappingResult.FromDictionary(parsedValues);
     }
@@ -161,7 +175,7 @@ public class ScriptExecutor : IScriptExecutor
         }
     }
 
-    private async Task<string> ExecuteNonElevatedScriptAsync(string fileName, string arguments)
+    private async Task<(string output, string error)> ExecuteNonElevatedScriptAsync(string fileName, string arguments)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -178,17 +192,19 @@ public class ScriptExecutor : IScriptExecutor
             using var process = Process.Start(startInfo);
             if (process == null)
             {
-                return "STATUS=ERROR\nErrorMessage=Failed to start PowerShell process";
+                return ("STATUS=ERROR\nErrorMessage=Failed to start PowerShell process", string.Empty);
             }
 
             var output = await process.StandardOutput.ReadToEndAsync();
+            var error = await process.StandardError.ReadToEndAsync();
+
             await process.WaitForExitAsync();
 
-            return output;
+            return (output, error);
         }
         catch (Exception ex)
         {
-            return $"STATUS=ERROR\nErrorMessage={ex.Message}";
+            return ($"STATUS=ERROR\nErrorMessage={ex.Message}", string.Empty);
         }
     }
 
