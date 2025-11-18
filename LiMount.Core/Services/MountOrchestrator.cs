@@ -1,6 +1,8 @@
 using System.Runtime.Versioning;
+using Microsoft.Extensions.Options;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
+using LiMount.Core.Configuration;
 
 namespace LiMount.Core.Services;
 
@@ -11,28 +13,25 @@ namespace LiMount.Core.Services;
 [SupportedOSPlatform("windows")]
 public class MountOrchestrator : IMountOrchestrator
 {
-    /// <summary>
-    /// Maximum number of retry attempts when verifying UNC path accessibility.
-    /// </summary>
-    private const int UncAccessibilityRetries = 5;
-
-    /// <summary>
-    /// Delay in milliseconds between UNC accessibility retry attempts.
-    /// </summary>
-    private const int UncAccessibilityDelayMs = 500;
-
     private readonly IScriptExecutor _scriptExecutor;
     private readonly IMountHistoryService? _historyService;
+    private readonly MountOperationsConfig _config;
 
     /// <summary>
     /// Initializes a new instance of <see cref="MountOrchestrator"/> using the provided script executor.
     /// </summary>
     /// <param name="scriptExecutor">The script executor for running PowerShell scripts.</param>
+    /// <param name="config">Configuration for mount operations.</param>
     /// <param name="historyService">Optional history service for tracking mount operations.</param>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="scriptExecutor"/> is null.</exception>
-    public MountOrchestrator(IScriptExecutor scriptExecutor, IMountHistoryService? historyService = null)
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="scriptExecutor"/> or <paramref name="config"/> is null.</exception>
+    public MountOrchestrator(
+        IScriptExecutor scriptExecutor,
+        IOptions<LiMountConfiguration> config,
+        IMountHistoryService? historyService = null)
     {
         _scriptExecutor = scriptExecutor ?? throw new ArgumentNullException(nameof(scriptExecutor));
+        ArgumentNullException.ThrowIfNull(config);
+        _config = config.Value.MountOperations;
         _historyService = historyService;
     }
 
@@ -116,14 +115,14 @@ public class MountOrchestrator : IMountOrchestrator
             progress?.Report("Verifying WSL share accessibility...");
 
             bool uncAccessible = false;
-            for (int i = 0; i < UncAccessibilityRetries; i++)
+            for (int i = 0; i < _config.UncAccessibilityRetries; i++)
             {
                 if (Directory.Exists(uncPath))
                 {
                     uncAccessible = true;
                     break;
                 }
-                await Task.Delay(UncAccessibilityDelayMs);
+                await Task.Delay(_config.UncAccessibilityDelayMs);
             }
 
             if (!uncAccessible)

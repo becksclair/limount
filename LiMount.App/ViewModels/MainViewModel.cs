@@ -7,6 +7,7 @@ using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
+using LiMount.App.Services;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
 using LiMount.Core.Services;
@@ -24,6 +25,8 @@ public partial class MainViewModel : ObservableObject
     private readonly IDriveLetterService _driveLetterService;
     private readonly IMountOrchestrator _mountOrchestrator;
     private readonly IUnmountOrchestrator _unmountOrchestrator;
+    private readonly IMountStateService _mountStateService;
+    private readonly IDialogService _dialogService;
     private readonly ILogger<MainViewModel> _logger;
 
     [ObservableProperty]
@@ -96,18 +99,24 @@ public partial class MainViewModel : ObservableObject
     /// <param name="driveLetterService">Service used to obtain available drive letters.</param>
     /// <param name="mountOrchestrator">Service used to orchestrate mounting and mapping operations.</param>
     /// <param name="unmountOrchestrator">Service used to orchestrate unmounting and unmapping operations.</param>
+    /// <param name="mountStateService">Service used to track active mount state persistently.</param>
+    /// <param name="dialogService">Service used to display dialogs to the user.</param>
     /// <param name="logger">Logger for diagnostic information.</param>
     public MainViewModel(
         IDiskEnumerationService diskService,
         IDriveLetterService driveLetterService,
         IMountOrchestrator mountOrchestrator,
         IUnmountOrchestrator unmountOrchestrator,
+        IMountStateService mountStateService,
+        IDialogService dialogService,
         ILogger<MainViewModel> logger)
     {
         _diskService = diskService;
         _driveLetterService = driveLetterService;
         _mountOrchestrator = mountOrchestrator;
         _unmountOrchestrator = unmountOrchestrator;
+        _mountStateService = mountStateService;
+        _dialogService = dialogService;
         _logger = logger;
 
         PropertyChanged += OnPropertyChanged;
@@ -306,6 +315,22 @@ public partial class MainViewModel : ObservableObject
             CurrentMountedDriveLetter = SelectedDriveLetter.Value;
             CanOpenExplorer = true;
 
+            // Register mount state persistently
+            var activeMount = new ActiveMount
+            {
+                Id = Guid.NewGuid().ToString(),
+                MountedAt = DateTime.Now,
+                DiskIndex = result.DiskIndex,
+                PartitionNumber = result.PartitionNumber,
+                DriveLetter = result.DriveLetter,
+                DistroName = result.DistroName,
+                MountPathLinux = result.MountPathLinux,
+                MountPathUNC = result.MountPathUNC,
+                IsVerified = true,
+                LastVerified = DateTime.Now
+            };
+            await _mountStateService.RegisterMountAsync(activeMount);
+
             StatusMessage = $"Success! Mounted as {SelectedDriveLetter}: - You can now access the Linux partition from Windows Explorer.";
         }
         catch (Exception ex)
@@ -379,14 +404,13 @@ public partial class MainViewModel : ObservableObject
         }
 
         // Ask for confirmation
-        var result = MessageBox.Show(
+        var confirmed = await _dialogService.ConfirmAsync(
             $"Are you sure you want to unmount disk {CurrentMountedDiskIndex} (Drive {CurrentMountedDriveLetter}:)?\n\n" +
             "Make sure you have saved and closed any files on this drive before unmounting.",
             "Confirm Unmount",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning);
+            DialogType.Warning);
 
-        if (result != MessageBoxResult.Yes)
+        if (!confirmed)
         {
             StatusMessage = "Unmount cancelled.";
             return;
@@ -410,7 +434,10 @@ public partial class MainViewModel : ObservableObject
             }
 
             // Success! Clear mount state
-            StatusMessage = $"Successfully unmounted disk {CurrentMountedDiskIndex}.";
+            var diskIndex = CurrentMountedDiskIndex.Value;
+            await _mountStateService.UnregisterMountAsync(diskIndex);
+
+            StatusMessage = $"Successfully unmounted disk {diskIndex}.";
             CurrentMountedDiskIndex = null;
             CurrentMountedPartition = null;
             CurrentMountedDriveLetter = null;

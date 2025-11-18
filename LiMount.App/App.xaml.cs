@@ -1,9 +1,12 @@
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
 using LiMount.App.ViewModels;
+using LiMount.App.Services;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Services;
+using LiMount.Core.Configuration;
 using Serilog;
 using System.IO;
 
@@ -39,6 +42,16 @@ public partial class App : Application
     /// </remarks>
     private void ConfigureServices(IServiceCollection services)
     {
+        // Build configuration from appsettings.json
+        var configuration = new ConfigurationBuilder()
+            .SetBasePath(AppContext.BaseDirectory)
+            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+            .Build();
+
+        // Register configuration
+        services.AddSingleton<IConfiguration>(configuration);
+        services.Configure<LiMountConfiguration>(configuration.GetSection(LiMountConfiguration.SectionName));
+
         // Configure Serilog for file logging
         var logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                                    "LiMount", "logs", "limount-.log");
@@ -95,6 +108,10 @@ public partial class App : Application
         services.AddSingleton<IDriveLetterService, DriveLetterService>();
         services.AddSingleton<IScriptExecutor, ScriptExecutor>();
         services.AddSingleton<IMountHistoryService, MountHistoryService>();
+        services.AddSingleton<IMountStateService, MountStateService>();
+
+        // Register App services
+        services.AddSingleton<IDialogService, DialogService>();
 
         // Register orchestrators
         services.AddTransient<IMountOrchestrator, MountOrchestrator>();

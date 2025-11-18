@@ -1,6 +1,9 @@
 using System.Windows;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using LiMount.App.ViewModels;
+using LiMount.App.Services;
+using LiMount.Core.Configuration;
 
 namespace LiMount.App;
 
@@ -9,34 +12,29 @@ namespace LiMount.App;
 /// </summary>
 public partial class MainWindow : Window
 {
-    /// <summary>
-    /// Maximum number of retry attempts for ViewModel initialization.
-    /// </summary>
-    private const int InitializationMaxRetries = 2;
-
-    /// <summary>
-    /// Base delay in milliseconds for exponential backoff during initialization retries.
-    /// </summary>
-    private const int InitializationBaseDelayMs = 1000;
-
-    /// <summary>
-    /// Maximum delay in milliseconds for exponential backoff during initialization retries.
-    /// </summary>
-    private const int InitializationMaxDelayMs = 10000;
-
     private readonly ILogger<MainWindow> _logger;
+    private readonly IDialogService _dialogService;
+    private readonly InitializationConfig _config;
     private readonly CancellationTokenSource _cancellationTokenSource = new();
 
     /// <summary>
     /// Initializes the window, assigns the provided view model to DataContext, and registers an asynchronous Loaded handler that initializes the view model; initialization failures are handled by showing a critical error and closing the window.
     /// </summary>
     /// <param name="viewModel">The view model instance to attach to the window as its DataContext and to initialize on load.</param>
+    /// <param name="dialogService">Service for displaying dialogs to the user.</param>
+    /// <param name="config">Configuration for application initialization behavior.</param>
     /// <param name="logger">The logger instance for logging initialization events and errors.</param>
-    public MainWindow(MainViewModel viewModel, ILogger<MainWindow> logger)
+    public MainWindow(
+        MainViewModel viewModel,
+        IDialogService dialogService,
+        IOptions<LiMountConfiguration> config,
+        ILogger<MainWindow> logger)
     {
         InitializeComponent();
 
         _logger = logger;
+        _dialogService = dialogService;
+        _config = config.Value.Initialization;
 
         // Set the DataContext to injected ViewModel
         DataContext = viewModel;
@@ -76,7 +74,7 @@ public partial class MainWindow : Window
         int retryCount = 0;
         bool extraRetryUsed = false;
 
-        while (retryCount <= InitializationMaxRetries && !cancellationToken.IsCancellationRequested)
+        while (retryCount <= _config.MaxRetries && !cancellationToken.IsCancellationRequested)
         {
             try
             {
@@ -96,9 +94,9 @@ public partial class MainWindow : Window
                     return;
                 }
 
-                _logger.LogError(ex, "Failed to initialize ViewModel (attempt {Attempt}/{MaxAttempts})", retryCount + 1, InitializationMaxRetries + 1);
+                _logger.LogError(ex, "Failed to initialize ViewModel (attempt {Attempt}/{MaxAttempts})", retryCount + 1, _config.MaxRetries + 1);
 
-                if (retryCount == InitializationMaxRetries)
+                if (retryCount == _config.MaxRetries)
                 {
                     // Final attempt failed - show error dialog and disable UI
                     if (cancellationToken.IsCancellationRequested)
@@ -106,19 +104,18 @@ public partial class MainWindow : Window
                         return;
                     }
 
-                    var result = MessageBox.Show(
+                    var retry = await _dialogService.ConfirmAsync(
                         "Failed to initialize the application. This may be due to missing dependencies or insufficient permissions.\n\n" +
                         $"Error: {ex.Message}\n\n" +
                         "Would you like to retry one more time?",
                         "Initialization Failed",
-                        MessageBoxButton.YesNo,
-                        MessageBoxImage.Error);
+                        DialogType.Error);
 
-                    if (result == MessageBoxResult.Yes && !extraRetryUsed)
+                    if (retry && !extraRetryUsed)
                     {
                         extraRetryUsed = true;
                         // Apply exponential backoff delay before final retry
-                        var delay = Math.Min(InitializationBaseDelayMs * (int)Math.Pow(2, retryCount), InitializationMaxDelayMs);
+                        var delay = Math.Min(_config.BaseDelayMs * (int)Math.Pow(2, retryCount), _config.MaxDelayMs);
                         await Task.Delay(delay, cancellationToken);
                         continue;
                     }
@@ -134,22 +131,21 @@ public partial class MainWindow : Window
                     return;
                 }
 
-                var retryResult = MessageBox.Show(
-                    $"Initialization failed (attempt {retryCount + 1} of {InitializationMaxRetries + 1}).\n\n" +
+                var retryNow = await _dialogService.ConfirmAsync(
+                    $"Initialization failed (attempt {retryCount + 1} of {_config.MaxRetries + 1}).\n\n" +
                     $"Error: {ex.Message}\n\n" +
                     "Would you like to retry?",
                     "Initialization Failed",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Warning);
+                    DialogType.Warning);
 
-                if (retryResult != MessageBoxResult.Yes)
+                if (!retryNow)
                 {
                     DisableUI();
                     return;
                 }
 
                 // Apply exponential backoff delay before retry
-                var retryDelay = Math.Min(InitializationBaseDelayMs * (int)Math.Pow(2, retryCount), InitializationMaxDelayMs);
+                var retryDelay = Math.Min(_config.BaseDelayMs * (int)Math.Pow(2, retryCount), _config.MaxDelayMs);
                 await Task.Delay(retryDelay, cancellationToken);
             }
 
@@ -181,17 +177,15 @@ public partial class MainWindow : Window
     /// Logs a critical initialization error, displays an error dialog with the exception message, and closes the window.
     /// </summary>
     /// <param name="ex">The exception that caused initialization to fail; its message is shown in the dialog.</param>
-    private void ShowCriticalErrorAndClose(Exception ex)
+    private async void ShowCriticalErrorAndClose(Exception ex)
     {
         _logger.LogCritical(ex, "Critical error during application initialization - showing error dialog and closing");
 
-        MessageBox.Show(
+        await _dialogService.ShowErrorAsync(
             "A critical error occurred during application initialization that could not be recovered from.\n\n" +
             $"Error details: {ex.Message}\n\n" +
             "The application will now close. Please check the application logs for more details.",
-            "Critical Application Error",
-            MessageBoxButton.OK,
-            MessageBoxImage.Error);
+            "Critical Application Error");
 
         Close();
     }
@@ -199,7 +193,7 @@ public partial class MainWindow : Window
     /// <summary>
     /// Disables the window's main content, shows a permanent error dialog indicating startup failure, and closes the window.
     /// </summary>
-    private void DisableUIInternal()
+    private async void DisableUIInternal()
     {
         // Find the main grid or container and disable it
         if (Content is FrameworkElement element)
@@ -208,11 +202,9 @@ public partial class MainWindow : Window
         }
 
         // Show a permanent error message
-        MessageBox.Show(
+        await _dialogService.ShowErrorAsync(
             "The application could not be initialized and will now close. Please check the logs for details and ensure all required dependencies are available.",
-            "Application Cannot Start",
-            MessageBoxButton.OK,
-            MessageBoxImage.Error);
+            "Application Cannot Start");
 
         Close();
     }

@@ -1,8 +1,10 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
+using LiMount.Core.Configuration;
 
 namespace LiMount.Core.Services;
 
@@ -13,26 +15,23 @@ namespace LiMount.Core.Services;
 [SupportedOSPlatform("windows")]
 public class ScriptExecutor : IScriptExecutor
 {
-    /// <summary>
-    /// Maximum time to wait for elevated script output temp file to appear.
-    /// </summary>
-    private const int TempFilePollingTimeoutSeconds = 5;
-
-    /// <summary>
-    /// Interval between checks when polling for temp file.
-    /// </summary>
-    private const int TempFilePollingIntervalMs = 100;
-
     private readonly string _scriptsPath;
     private readonly ILogger<ScriptExecutor>? _logger;
+    private readonly ScriptExecutionConfig _config;
 
     /// <summary>
     /// Initializes a new instance of <see cref="ScriptExecutor"/> and sets the scripts directory path.
     /// </summary>
+    /// <param name="config">Configuration for script execution.</param>
     /// <param name="scriptsPath">Optional explicit path to the directory containing PowerShell scripts; if null, the implementation locates a suitable scripts directory automatically.</param>
     /// <param name="logger">Optional logger for diagnostic information.</param>
-    public ScriptExecutor(string? scriptsPath = null, ILogger<ScriptExecutor>? logger = null)
+    public ScriptExecutor(
+        IOptions<LiMountConfiguration> config,
+        string? scriptsPath = null,
+        ILogger<ScriptExecutor>? logger = null)
     {
+        ArgumentNullException.ThrowIfNull(config);
+        _config = config.Value.ScriptExecution;
         _scriptsPath = scriptsPath ?? FindScriptsPath();
         _logger = logger;
     }
@@ -281,8 +280,8 @@ public class ScriptExecutor : IScriptExecutor
                 : Path.Combine(Path.GetTempPath(), $"limount_mount_{diskIndex}_{partition}.txt");
 
             // Wait for file to be written
-            var timeout = TimeSpan.FromSeconds(TempFilePollingTimeoutSeconds);
-            var pollingInterval = TimeSpan.FromMilliseconds(TempFilePollingIntervalMs);
+            var timeout = TimeSpan.FromSeconds(_config.TempFilePollingTimeoutSeconds);
+            var pollingInterval = TimeSpan.FromMilliseconds(_config.PollingIntervalMs);
             var totalWaitTime = TimeSpan.Zero;
 
             while (totalWaitTime < timeout)
