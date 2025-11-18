@@ -8,11 +8,11 @@ namespace LiMount.App;
 /// </summary>
 public partial class MainWindow : Window
 {
-    public MainWindow()
+    public MainWindow(MainViewModel viewModel)
     {
         InitializeComponent();
 
-        // Set the DataContext to MainViewModel
-        DataContext = new MainViewModel();
+        // Set the DataContext to injected ViewModel
+        DataContext = viewModel;
     }
 }

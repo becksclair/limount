@@ -1,5 +1,6 @@
 using System.Management;
 using System.Runtime.Versioning;
+using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
 
 namespace LiMount.Core.Services;
@@ -15,7 +16,7 @@ namespace LiMount.Core.Services;
 /// - https://learn.microsoft.com/en-us/windows/win32/wmisdk/wmi-tasks--disks-and-file-systems
 /// </summary>
 [SupportedOSPlatform("windows")]
-public class DiskEnumerationService
+public class DiskEnumerationService : IDiskEnumerationService
 {
     /// <summary>
     /// Enumerates all physical disk drives on the system.

@@ -19,6 +19,13 @@
     <!-- CommunityToolkit.Mvvm for MVVM helpers (RelayCommand, ObservableProperty, etc.) -->
     <!-- Version 8.3.2 is the latest stable for .NET 8 -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+
+    <!-- Microsoft.Extensions.DependencyInjection for dependency injection -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+
+    <!-- Microsoft.Extensions.Logging for structured logging -->
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="8.0.1" />
   </ItemGroup>
 
 </Project>
