@@ -27,7 +27,8 @@ public class UnmappingResult
     /// </summary>
     public static UnmappingResult FromDictionary(Dictionary<string, string> values)
     {
-        var success = values.TryGetValue("STATUS", out var status) && status == "OK";
+        var success = values.TryGetValue("STATUS", out var status) && 
+                      string.Equals(status, "OK", StringComparison.OrdinalIgnoreCase);
 
         return new UnmappingResult
         {

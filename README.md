@@ -15,6 +15,7 @@
 ## Requirements
 
 ### System Requirements
+
 - **Operating System**: Windows 10 (Build 19041+) or Windows 11 (Build 22000+ recommended)
 - **WSL**: Windows Subsystem for Linux 2 (WSL2) installed and configured
   - Requires `wsl --mount` support (Windows 11 Build 22000+ or Microsoft Store WSL)
@@ -22,25 +23,39 @@
 - **Privileges**: Administrator access (for mounting disks)
 
 ### Development Requirements
+
 - **.NET 8 SDK**: [Download .NET 8](https://dotnet.microsoft.com/download/dotnet/8.0)
 - **Visual Studio 2022** or **Visual Studio Code** (optional, for development)
 
 ## Project Structure
 
-```
+```text
 limount/
 ├── LiMount.sln                      # Solution file
 ├── LiMount.Core/                    # Core library (.NET 8)
+│   ├── Interfaces/                 # Service interfaces
+│   │   ├── IDiskEnumerationService.cs
+│   │   ├── IDriveLetterService.cs
+│   │   ├── IMountOrchestrator.cs
+│   │   ├── IScriptExecutor.cs
+│   │   └── IUnmountOrchestrator.cs
 │   ├── Models/                      # Data models
 │   │   ├── DiskInfo.cs
 │   │   ├── PartitionInfo.cs
 │   │   ├── DriveLetterInfo.cs
 │   │   ├── MountResult.cs
-│   │   └── MappingResult.cs
+│   │   ├── MappingResult.cs
+│   │   ├── MountAndMapResult.cs
+│   │   ├── UnmountResult.cs
+│   │   ├── UnmappingResult.cs
+│   │   └── UnmountAndUnmapResult.cs
 │   └── Services/                    # Business logic services
 │       ├── DiskEnumerationService.cs
 │       ├── DriveLetterService.cs
-│       └── KeyValueOutputParser.cs
+│       ├── KeyValueOutputParser.cs
+│       ├── ScriptExecutor.cs
+│       ├── MountOrchestrator.cs
+│       └── UnmountOrchestrator.cs
 ├── LiMount.App/                     # WPF application (.NET 8)
 │   ├── ViewModels/                  # MVVM ViewModels
 │   │   └── MainViewModel.cs
@@ -52,8 +67,10 @@ limount/
 │   └── App.xaml.cs
 └── scripts/                         # PowerShell helper scripts
     ├── Mount-LinuxDiskCore.ps1      # Elevated: WSL mount script
-    └── Map-WSLShareToDrive.ps1      # Non-elevated: Drive mapping script
-```
+    ├── Map-WSLShareToDrive.ps1      # Non-elevated: Drive mapping script
+    ├── Unmount-LinuxDisk.ps1        # Elevated: WSL unmount script
+    └── Unmap-DriveLetter.ps1        # Non-elevated: Drive unmapping script
+```text
 
 ## Building the Application
 
@@ -139,7 +156,7 @@ limount/
 - `DistroName` (optional): Specific WSL distribution name
 
 **Output**: Machine-readable key=value pairs:
-```
+```text
 STATUS=OK
 DistroName=Ubuntu
 MountPathLinux=/mnt/wsl/PHYSICALDRIVE2p1
@@ -160,7 +177,7 @@ MountPathUNC=\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE2p1
 - `TargetUNC` (required): UNC path to map (e.g., `\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE2p1`)
 
 **Output**: Machine-readable key=value pairs:
-```
+```text
 STATUS=OK
 DriveLetter=L
 MappedTo=\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE2p1
@@ -209,7 +226,7 @@ MappedTo=\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE2p1
 This is an MVP/prototype with the following limitations:
 
 - **Minimal Error Recovery**: Error handling is basic; failed mounts may require manual cleanup
-- **No Unmount Feature**: Currently, you must manually unmount using `wsl --unmount` or `net use /delete`
+- **Limited Unmount Feature**: Basic unmount functionality available but may require manual cleanup in some cases
 - **Single Distro Support**: Auto-detects the first WSL distro; multi-distro scenarios may need manual specification
 - **Windows 11 Preferred**: `wsl --mount` works best on Windows 11 Build 22000+; older builds may have limited support
 - **No Persistence**: Drive mappings are session-based and may not survive reboots
@@ -218,19 +235,23 @@ This is an MVP/prototype with the following limitations:
 ## Troubleshooting
 
 ### "wsl --mount is not supported"
+
 - Ensure you're running Windows 11 Build 22000+ or have the Microsoft Store version of WSL installed
 - Update WSL: `wsl --update`
 
 ### "Disk X is a system or boot disk"
+
 - LiMount refuses to mount system/boot disks for safety
 - Only select secondary/external disks
 
 ### "UNC path is not reachable"
+
 - Ensure WSL2 is running: `wsl --list --verbose`
 - Verify the mount succeeded: `wsl -- ls /mnt/wsl`
 - Check network sharing is enabled for WSL
 
 ### Drive letter not appearing in Explorer
+
 - Refresh Explorer (F5)
 - Try a different drive letter
 - Verify the mapping: `net use` in Command Prompt
@@ -239,7 +260,7 @@ This is an MVP/prototype with the following limitations:
 
 This is a prototype/MVP project. Contributions are welcome! Areas for improvement:
 
-- **Unmount Feature**: Add UI to unmount and unmap drives
+- **Enhanced Unmount Feature**: Improve UI and reliability for unmount and unmap operations
 - **Multi-Distro Support**: Allow selecting which WSL distro to use
 - **Persistent Mappings**: Option to persist drive mappings across reboots
 - **Better Error Handling**: More robust error recovery and user guidance

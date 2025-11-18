@@ -37,12 +37,17 @@ function Write-Result {
 
     if ($Success) {
         $output += "STATUS=OK"
-        $output += "DiskIndex=$DiskIndex"
         $exitCode = 0
     } else {
         $output += "STATUS=ERROR"
-        $output += "ErrorMessage=$ErrorMessage"
         $exitCode = 1
+    }
+
+    # Always include DiskIndex so the .NET parser can identify which disk was processed
+    $output += "DiskIndex=$DiskIndex"
+
+    if (-not $Success) {
+        $output += "ErrorMessage=$ErrorMessage"
     }
 
     # Write to stdout

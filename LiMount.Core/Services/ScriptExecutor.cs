@@ -152,13 +152,8 @@ public class ScriptExecutor : IScriptExecutor
                 return output;
             }
 
-            // Fallback based on exit code
-            if (process.ExitCode == 0)
-            {
-                return "STATUS=OK";
-            }
-
-            return $"STATUS=ERROR\nErrorMessage=Script exited with code {process.ExitCode}";
+            // Temp output file not found - treat as error regardless of exit code
+            return $"STATUS=ERROR\nErrorMessage=Elevated script produced no output. Expected temp file: {tempOutputFile}, Process exit code: {process.ExitCode}";
         }
         catch (Exception ex)
         {

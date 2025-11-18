@@ -1,4 +1,5 @@
 using System.Windows;
+using Microsoft.Extensions.Logging;
 using LiMount.App.ViewModels;
 
 namespace LiMount.App;
@@ -8,11 +9,153 @@ namespace LiMount.App;
 /// </summary>
 public partial class MainWindow : Window
 {
-    public MainWindow(MainViewModel viewModel)
+    private readonly ILogger<MainWindow> _logger;
+
+    public MainWindow(MainViewModel viewModel, ILogger<MainWindow> logger)
     {
         InitializeComponent();
 
+        _logger = logger;
+
         // Set the DataContext to injected ViewModel
         DataContext = viewModel;
+
+        // Subscribe to Loaded event for async initialization
+        Loaded += async (sender, e) =>
+        {
+            try
+            {
+                await InitializeViewModelAsync(viewModel);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogCritical(ex, "Unhandled exception in MainWindow Loaded event during ViewModel initialization");
+
+                // Ensure UI updates are dispatched to UI thread
+                if (Dispatcher.CheckAccess())
+                {
+                    ShowCriticalErrorAndClose(ex);
+                }
+                else
+                {
+                    Dispatcher.Invoke(() => ShowCriticalErrorAndClose(ex));
+                }
+            }
+        };
+    }
+
+    private async Task InitializeViewModelAsync(MainViewModel viewModel)
+    {
+        const int maxRetries = 2;
+        const int baseDelayMs = 1000;
+        const int maxDelayMs = 10000;
+        int retryCount = 0;
+        bool extraRetryUsed = false;
+
+        while (retryCount <= maxRetries)
+        {
+            try
+            {
+                await viewModel.InitializeAsync();
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to initialize ViewModel (attempt {Attempt}/{MaxAttempts})", retryCount + 1, maxRetries + 1);
+
+                if (retryCount == maxRetries)
+                {
+                    // Final attempt failed - show error dialog and disable UI
+                    var result = MessageBox.Show(
+                        "Failed to initialize the application. This may be due to missing dependencies or insufficient permissions.\n\n" +
+                        $"Error: {ex.Message}\n\n" +
+                        "Would you like to retry one more time?",
+                        "Initialization Failed",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Error);
+
+                    if (result == MessageBoxResult.Yes && !extraRetryUsed)
+                    {
+                        extraRetryUsed = true;
+                        // Apply exponential backoff delay before final retry
+                        var delay = Math.Min(baseDelayMs * (int)Math.Pow(2, retryCount), maxDelayMs);
+                        await Task.Delay(delay);
+                        continue;
+                    }
+
+                    // User chose not to retry or extra retry already used
+                    DisableUI();
+                    return;
+                }
+
+                // Show retry dialog for non-final attempts
+                var retryResult = MessageBox.Show(
+                    $"Initialization failed (attempt {retryCount + 1} of {maxRetries + 1}).\n\n" +
+                    $"Error: {ex.Message}\n\n" +
+                    "Would you like to retry?",
+                    "Initialization Failed",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+
+                if (retryResult != MessageBoxResult.Yes)
+                {
+                    DisableUI();
+                    return;
+                }
+
+                // Apply exponential backoff delay before retry
+                var delay = Math.Min(baseDelayMs * (int)Math.Pow(2, retryCount), maxDelayMs);
+                await Task.Delay(delay);
+            }
+
+            retryCount++;
+        }
+    }
+
+    private void DisableUI()
+    {
+        _logger.LogWarning("Application UI disabled due to initialization failure");
+
+        if (Dispatcher.CheckAccess())
+        {
+            DisableUIInternal();
+        }
+        else
+        {
+            Dispatcher.Invoke(DisableUIInternal);
+        }
+    }
+
+    private void ShowCriticalErrorAndClose(Exception ex)
+    {
+        _logger.LogCritical(ex, "Critical error during application initialization - showing error dialog and closing");
+
+        MessageBox.Show(
+            "A critical error occurred during application initialization that could not be recovered from.\n\n" +
+            $"Error details: {ex.Message}\n\n" +
+            "The application will now close. Please check the application logs for more details.",
+            "Critical Application Error",
+            MessageBoxButton.OK,
+            MessageBoxImage.Error);
+
+        Close();
+    }
+
+    private void DisableUIInternal()
+    {
+        // Find the main grid or container and disable it
+        if (Content is FrameworkElement element)
+        {
+            element.IsEnabled = false;
+        }
+
+        // Show a permanent error message
+        MessageBox.Show(
+            "The application could not be initialized and will now close. Please check the logs for details and ensure all required dependencies are available.",
+            "Application Cannot Start",
+            MessageBoxButton.OK,
+            MessageBoxImage.Error);
+
+        Close();
     }
 }

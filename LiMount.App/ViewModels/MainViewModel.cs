@@ -5,6 +5,7 @@ using System.IO;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
 using LiMount.Core.Services;
 
@@ -17,8 +18,8 @@ namespace LiMount.App.ViewModels;
 /// </summary>
 public partial class MainViewModel : ObservableObject
 {
-    private readonly DiskEnumerationService _diskService;
-    private readonly DriveLetterService _driveLetterService;
+    private readonly IDiskEnumerationService _diskService;
+    private readonly IDriveLetterService _driveLetterService;
 
     [ObservableProperty]
     private ObservableCollection<DiskInfo> _disks = new();
@@ -52,16 +53,13 @@ public partial class MainViewModel : ObservableObject
 
     private string? _lastMappedDriveLetter;
 
-    public MainViewModel()
+    public MainViewModel(IDiskEnumerationService diskService, IDriveLetterService driveLetterService)
     {
-        _diskService = new DiskEnumerationService();
-        _driveLetterService = new DriveLetterService();
+        _diskService = diskService;
+        _driveLetterService = driveLetterService;
 
         // Subscribe to SelectedDisk changes to update partitions
         PropertyChanged += OnPropertyChanged;
-
-        // Initial load
-        LoadDisksAndDriveLetters();
     }
 
     private void OnPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -79,6 +77,15 @@ public partial class MainViewModel : ObservableObject
     private void Refresh()
     {
         LoadDisksAndDriveLetters();
+    }
+
+    /// <summary>
+    /// Initializes the ViewModel by loading disks and drive letters asynchronously.
+    /// Call this after instantiation to perform heavy I/O operations.
+    /// </summary>
+    public async Task InitializeAsync()
+    {
+        await Task.Run(() => LoadDisksAndDriveLetters());
     }
 
     private void LoadDisksAndDriveLetters()
