@@ -1,263 +1,563 @@
-# CLAUDE.md
+# AGENTS.md
+## Guidance for AI Agents Working on LiMount
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides specific guidance for AI code assistants (like Claude, Copilot, etc.) working on the LiMount codebase.
 
-## Project Overview
+---
 
-**LiMount** is a Windows desktop application that mounts Linux disk partitions into WSL2 and maps them as Windows drive letters. Built with C# WPF (.NET 8) and PowerShell scripts.
+## 🎯 Core Directives
 
-**Key Technologies:**
-- .NET 8 (LTS) with `net8.0-windows` target framework
-- WPF (Windows Presentation Foundation)
-- CommunityToolkit.Mvvm (v8.3.2) for MVVM helpers
-- System.Management (v10.0.0) for WMI disk enumeration
-- Serilog for file logging
-- PowerShell for elevated WSL operations
+### 1. **ALWAYS Read CLAUDE.md First**
+Before making ANY code changes, read `/home/user/limount/CLAUDE.md` completely. It contains:
+- Project architecture and patterns
+- Design principles you MUST follow
+- Known limitations and constraints
+- Common pitfalls to avoid
 
-**Platform:** Windows-only. Services use `[SupportedOSPlatform("windows")]` attributes.
+### 2. **Think Before Acting - "Ultrathink"**
+When asked to implement a feature:
 
-## Building and Running
+**Step 1**: Analyze the Request
+- What is the user really trying to accomplish?
+- Does this fit the existing architecture?
+- What similar patterns exist in the codebase?
 
-### Build Commands
+**Step 2**: Plan the Implementation
+- Which services/interfaces are involved?
+- What new files need to be created?
+- What existing files need modification?
+- How will this integrate with DI?
 
+**Step 3**: Consider Implications
+- Does this need configuration? (appsettings.json)
+- Does this need persistence? (IMountStateService or IMountHistoryService)
+- Does this need testing? (always yes!)
+- Are there security implications?
+
+**Step 4**: Execute Incrementally
+- Create interfaces first
+- Implement one service at a time
+- Test as you go
+- Commit frequently
+
+### 3. **Never Violate Architecture Principles**
+These are **RULES**, not suggestions:
+
+❌ **NEVER** hardcode timeout/retry values (use IOptions<LiMountConfiguration>)
+❌ **NEVER** use `new` for services (use DI)
+❌ **NEVER** put business logic in ViewModels (use services/orchestrators)
+❌ **NEVER** call MessageBox directly (use IDialogService)
+❌ **NEVER** store mount state only in ViewModel (use IMountStateService)
+❌ **NEVER** silently swallow exceptions without logging
+❌ **NEVER** duplicate validation logic across layers
+
+✅ **ALWAYS** inject dependencies via constructor
+✅ **ALWAYS** create interfaces for new services
+✅ **ALWAYS** validate parameters in orchestrators
+✅ **ALWAYS** log errors with context
+✅ **ALWAYS** return Result objects for operations
+✅ **ALWAYS** use async/await for I/O
+
+---
+
+## 🔍 Problem-Solving Methodology
+
+### When Adding a New Feature
+
+```
+1. EXPLORE: What exists?
+   - Search for similar features: `Grep` tool
+   - Find related services: `Glob` tool
+   - Read existing implementations: `Read` tool
+
+2. DESIGN: How should it work?
+   - Interface: What contract is needed?
+   - Implementation: Where does logic live?
+   - Integration: How to wire into DI?
+   - Configuration: What should be tunable?
+
+3. IMPLEMENT: Build it right
+   - Create interface in `LiMount.Core/Interfaces/`
+   - Implement service in `LiMount.Core/Services/`
+   - Add model if needed in `LiMount.Core/Models/`
+   - Add configuration in `LiMount.Core/Configuration/` if needed
+   - Register in `App.xaml.cs` DI
+   - Update `appsettings.json` if needed
+
+4. TEST: Verify it works
+   - Create unit tests (or document why you can't on Linux)
+   - Test happy path
+   - Test error cases
+   - Test edge cases
+
+5. DOCUMENT: Help future developers
+   - Add XML comments
+   - Update CLAUDE.md if adding patterns
+   - Update TODO.md if completing tasks
+```
+
+### When Fixing a Bug
+
+```
+1. REPRODUCE: Understand the problem
+   - What's the expected behavior?
+   - What's the actual behavior?
+   - Under what conditions does it fail?
+
+2. LOCATE: Find the root cause
+   - Use `Grep` to find relevant code
+   - Read through the call stack
+   - Check logs if available
+   - Look for similar reported issues
+
+3. FIX: Address the root cause
+   - Don't just patch symptoms
+   - Consider if fix should be in orchestrator vs executor
+   - Add validation if missing
+   - Add error handling if missing
+
+4. PREVENT: Stop it from happening again
+   - Add validation to prevent invalid inputs
+   - Add logging to make debugging easier
+   - Add tests to catch regressions
+   - Document gotchas in CLAUDE.md
+```
+
+### When Refactoring
+
+```
+1. JUSTIFY: Why refactor?
+   - Code duplication?
+   - Violates architecture principles?
+   - Hard to test?
+   - Hard to maintain?
+
+2. PLAN: What's the end state?
+   - What design pattern solves this?
+   - What interfaces are needed?
+   - What's the migration path?
+   - Can it be done incrementally?
+
+3. EXECUTE: Refactor safely
+   - Create new interfaces/abstractions first
+   - Implement new code alongside old
+   - Migrate callers incrementally
+   - Remove old code last
+   - Commit at each stable point
+
+4. VERIFY: Nothing broke
+   - Run all tests
+   - Check that DI still resolves
+   - Verify UI still works
+   - Review code for missed updates
+```
+
+---
+
+## 🛠️ Tool Usage Guide
+
+### When to Use Each Tool
+
+**Glob**: Finding files by pattern
+```
+Use: Need to find all services, all models, all interfaces
+Example: Glob pattern="**/*Service.cs"
+```
+
+**Grep**: Searching code content
+```
+Use: Need to find where something is used, defined, or referenced
+Example: Grep pattern="IMountOrchestrator" output_mode="files_with_matches"
+```
+
+**Read**: Reading file contents
+```
+Use: Need to understand implementation details
+Always read before editing!
+```
+
+**Edit**: Making surgical changes
+```
+Use: Changing specific code sections
+Must read file first
+```
+
+**Write**: Creating new files
+```
+Use: Adding new services, interfaces, models
+Prefer Edit for existing files
+```
+
+**Bash**: Running commands
+```
+Use: Git operations, checking file structure
+NOT for reading code (use Read tool)
+```
+
+### Search Strategy
+
+**Finding Similar Code**:
 ```bash
-# Restore dependencies
-dotnet restore
+# 1. Find files with similar names
+Glob pattern="**/Mount*.cs"
 
-# Build entire solution
-dotnet build --configuration Debug
-dotnet build --configuration Release
+# 2. Find files using similar interfaces
+Grep pattern="IMountOrchestrator" output_mode="files_with_matches"
 
-# Run the WPF application
-dotnet run --project LiMount.App
-
-# Build a specific project
-dotnet build LiMount.Core
-dotnet build LiMount.App
+# 3. Read the implementations
+Read file_path="/home/user/limount/LiMount.Core/Services/MountOrchestrator.cs"
 ```
 
-### Development Notes
+**Understanding a Feature**:
+```bash
+# 1. Find the interface
+Glob pattern="**/IMountStateService.cs"
 
-- No automated tests currently exist in the project
-- Application requires Administrator elevation for mounting operations
-- The application creates logs at: `%LocalAppData%\LiMount\logs\limount-*.log` (production mode only)
-- PowerShell scripts are located in `scripts/` directory and must be accessible at runtime
+# 2. Find the implementation
+Grep pattern="class.*:.*IMountStateService"
 
-## Project Structure
+# 3. Find where it's used
+Grep pattern="IMountStateService" -C=3
 
-```
-LiMount.sln              # Solution file with 2 projects
-├── LiMount.Core/        # Core library (Windows-only .NET 8)
-│   ├── Interfaces/      # Service contracts
-│   ├── Models/          # Data transfer objects and results
-│   └── Services/        # Business logic and WMI/PowerShell interactions
-├── LiMount.App/         # WPF application (Windows-only .NET 8)
-│   ├── ViewModels/      # MVVM ViewModels
-│   ├── Converters/      # WPF value converters
-│   ├── MainWindow.xaml  # Main UI
-│   └── App.xaml.cs      # DI configuration and startup
-└── scripts/             # PowerShell helper scripts
-    ├── Mount-LinuxDiskCore.ps1    # Elevated: WSL mount
-    ├── Map-WSLShareToDrive.ps1    # Non-elevated: Drive mapping
-    ├── Unmount-LinuxDisk.ps1      # Elevated: WSL unmount
-    └── Unmap-DriveLetter.ps1      # Non-elevated: Drive unmapping
+# 4. Find where it's registered in DI
+Grep pattern="AddSingleton<IMountStateService" path="LiMount.App/App.xaml.cs"
 ```
 
-## Architecture
+---
 
-### Layered Design
+## 📚 Common Patterns & Templates
 
-**LiMount.Core** (Business Logic):
-- **Services Layer**: Platform-specific Windows services that interact with WMI and PowerShell
-  - `DiskEnumerationService`: Uses WMI (`Win32_DiskDrive`, `Win32_DiskPartition`, `Win32_LogicalDisk`) to enumerate disks and partitions
-  - `DriveLetterService`: Manages Windows drive letters using `DriveInfo.GetDrives()`
-  - `ScriptExecutor`: Executes PowerShell scripts with proper elevation handling
-  - `MountOrchestrator`: Orchestrates mount + mapping workflow with retry logic
-  - `UnmountOrchestrator`: Orchestrates unmount + unmapping workflow
-  - `KeyValueOutputParser`: Parses `key=value` output from PowerShell scripts
-
-**LiMount.App** (Presentation):
-- **MVVM Pattern**: Uses CommunityToolkit.Mvvm source generators
-  - `MainViewModel`: Main application logic with `[ObservableProperty]` and `[RelayCommand]` attributes
-  - Async initialization pattern to keep UI responsive during disk enumeration
-  - Progress reporting via `IProgress<string>` interface
-
-### Dependency Injection
-
-Configured in `App.xaml.cs` using `Microsoft.Extensions.DependencyInjection`:
+### Creating a New Service
 
 ```csharp
-// Core services (Singleton)
-services.AddSingleton<IDiskEnumerationService, DiskEnumerationService>();
-services.AddSingleton<IDriveLetterService, DriveLetterService>();
-services.AddSingleton<IScriptExecutor, ScriptExecutor>();
+// 1. Interface in LiMount.Core/Interfaces/IMyService.cs
+namespace LiMount.Core.Interfaces;
 
-// Orchestrators (Transient)
-services.AddTransient<IMountOrchestrator, MountOrchestrator>();
-services.AddTransient<IUnmountOrchestrator, UnmountOrchestrator>();
+public interface IMyService
+{
+    Task<Result> DoSomethingAsync(string param);
+}
 
-// ViewModels and Windows (Transient)
-services.AddTransient<MainViewModel>();
-services.AddTransient<MainWindow>();
+// 2. Implementation in LiMount.Core/Services/MyService.cs
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+[SupportedOSPlatform("windows")]
+public class MyService : IMyService
+{
+    private readonly ILogger<MyService> _logger;
+    private readonly LiMountConfiguration _config;
+
+    public MyService(
+        ILogger<MyService> logger,
+        IOptions<LiMountConfiguration> config)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _config = config.Value;
+    }
+
+    public async Task<Result> DoSomethingAsync(string param)
+    {
+        // Validate
+        if (string.IsNullOrWhiteSpace(param))
+        {
+            _logger.LogWarning("Invalid parameter provided");
+            return Result.Failure("Parameter cannot be empty");
+        }
+
+        try
+        {
+            // Do work
+            _logger.LogInformation("Doing something with {Param}", param);
+
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to do something");
+            return Result.Failure(ex.Message);
+        }
+    }
+}
+
+// 3. Register in App.xaml.cs
+services.AddSingleton<IMyService, MyService>();
 ```
 
-### PowerShell Script Execution
-
-**Two execution modes:**
-
-1. **Elevated (Mount/Unmount)**: Uses `ProcessStartInfo` with `Verb = "runas"` and `UseShellExecute = true`
-   - Cannot redirect stdout/stderr, so scripts write to temp files
-   - Temp file pattern: `%TEMP%\limount_mount_{diskIndex}_{partition}.txt` or `limount_unmount_{diskIndex}.txt`
-   - ScriptExecutor polls for temp file with timeout
-
-2. **Non-Elevated (Mapping/Unmapping)**: Uses `UseShellExecute = false` with redirected stdout/stderr
-   - Direct capture of script output
-
-**Script Output Format**: All scripts use machine-readable `key=value` format:
-```
-STATUS=OK
-DistroName=Ubuntu
-MountPathLinux=/mnt/wsl/PHYSICALDRIVE2p1
-MountPathUNC=\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE2p1
-```
-
-### Key Components
-
-**DiskEnumerationService**:
-- Queries WMI for disk and partition information
-- Implements heuristics to identify Linux partitions (no drive letter, non-NTFS/FAT32)
-- Filters out system/boot disks for safety
-- Returns `DiskInfo` objects with nested `PartitionInfo` collections
-
-**ScriptExecutor**:
-- Auto-locates `scripts/` directory using relative path search from application base directory
-- Handles both elevated and non-elevated PowerShell execution
-- Parses script output using `KeyValueOutputParser`
-- Temp file cleanup after elevated operations
-
-**MountOrchestrator**:
-- Two-phase operation: (1) WSL mount, (2) drive mapping
-- Includes UNC path accessibility verification with retry (5 attempts, 500ms delay)
-- Progress reporting throughout the workflow
-- Returns `MountAndMapResult` with detailed success/failure information
-
-**MainViewModel**:
-- Async initialization pattern: `InitializeAsync()` called from `MainWindow.OnLoaded`
-- Disk enumeration runs on background thread, UI updates on dispatcher
-- Auto-selection of first available disk, partition, and drive letter
-- Command execution guarded by `CanMount()` and `CanOpenExplorer()` methods
-
-## Coding Patterns
-
-### MVVM with Source Generators
-
-Use CommunityToolkit.Mvvm source generators for properties and commands:
+### Adding Configuration
 
 ```csharp
-[ObservableProperty]
-private bool _isBusy;  // Generates IsBusy property with INotifyPropertyChanged
+// 1. Add to LiMount.Core/Configuration/LiMountConfiguration.cs
+public class MyFeatureConfig
+{
+    public int MaxRetries { get; set; } = 3;
+    public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
+}
 
-[RelayCommand(CanExecute = nameof(CanMount))]
-private async Task MountAsync() { }  // Generates MountCommand
+// Update root config
+public class LiMountConfiguration
+{
+    // ... existing properties
+    public MyFeatureConfig MyFeature { get; set; } = new();
+}
+
+// 2. Add to appsettings.json
+{
+  "LiMount": {
+    "MyFeature": {
+      "MaxRetries": 3,
+      "Timeout": "00:00:30"
+    }
+  }
+}
+
+// 3. Use in service
+public class MyService
+{
+    private readonly MyFeatureConfig _config;
+
+    public MyService(IOptions<LiMountConfiguration> config)
+    {
+        _config = config.Value.MyFeature;
+    }
+}
 ```
 
-### Result Objects
+### Creating a Result Object
 
-All operations return strongly-typed result objects with `Success` flag:
-- `MountResult`: WSL mount operation results
-- `MappingResult`: Drive mapping results
-- `MountAndMapResult`: Combined operation results
-- `UnmountResult`: WSL unmount results
-- `UnmappingResult`: Drive unmapping results
+```csharp
+namespace LiMount.Core.Models;
 
-Each result class has `FromDictionary()` static method for parsing script output.
+public class MyOperationResult
+{
+    public bool Success { get; set; }
+    public string? Data { get; set; }
+    public string? ErrorMessage { get; set; }
+    public string? FailedStep { get; set; }
+    public DateTime Timestamp { get; set; } = DateTime.Now;
 
-### Async Patterns
+    public static MyOperationResult CreateSuccess(string data)
+    {
+        return new MyOperationResult
+        {
+            Success = true,
+            Data = data
+        };
+    }
 
-- Services use `async/await` throughout
-- UI operations check thread using `Application.Current.Dispatcher.InvokeAsync()`
-- `IProgress<string>` for progress reporting from orchestrators to ViewModel
-- `CancellationToken` support in initialization
+    public static MyOperationResult CreateFailure(string errorMessage, string failedStep)
+    {
+        return new MyOperationResult
+        {
+            Success = false,
+            ErrorMessage = errorMessage,
+            FailedStep = failedStep
+        };
+    }
+}
+```
 
-## Common Tasks
+---
 
-### Adding a New Service
+## ⚠️ Critical Reminders
 
-1. Define interface in `LiMount.Core/Interfaces/I{ServiceName}.cs`
-2. Implement service in `LiMount.Core/Services/{ServiceName}.cs`
-3. Add `[SupportedOSPlatform("windows")]` attribute if using Windows-specific APIs
-4. Register in `App.xaml.cs` DI configuration
-5. Inject into ViewModels or orchestrators via constructor
+### State Management
+```
+❌ WRONG:
+public class MainViewModel
+{
+    private int? _currentMountedDiskIndex; // Lost on restart!
+}
 
-### Adding a New PowerShell Script
+✅ RIGHT:
+public class MainViewModel
+{
+    private readonly IMountStateService _stateService;
 
-1. Create script in `scripts/` directory with proper parameter validation
-2. Implement machine-readable output using `key=value` format
-3. Add execution method in `ScriptExecutor` (elevated or non-elevated)
-4. Create corresponding result model in `LiMount.Core/Models/`
-5. Add `FromDictionary()` method to parse script output
+    public async Task<bool> IsDiskMountedAsync(int diskIndex)
+    {
+        return await _stateService.IsDiskMountedAsync(diskIndex);
+    }
+}
+```
 
-### Modifying the UI
+### Configuration
+```
+❌ WRONG:
+private const int Timeout = 5; // Hardcoded!
 
-1. Update XAML in `MainWindow.xaml`
-2. Add properties/commands to `MainViewModel.cs` using `[ObservableProperty]` and `[RelayCommand]`
-3. Create value converters in `LiMount.App/Converters/` if needed for binding transformations
-4. Wire up bindings in XAML
+✅ RIGHT:
+private readonly LiMountConfiguration _config;
+var timeout = _config.ScriptExecution.TempFilePollingTimeoutSeconds;
+```
 
-## Important Constraints
+### Dialog Abstraction
+```
+❌ WRONG:
+var result = MessageBox.Show("Confirm?", "Title", ...); // Untestable!
 
-### Safety Mechanisms
+✅ RIGHT:
+var confirmed = await _dialogService.ConfirmAsync("Confirm?", "Title");
+```
 
-- **System/Boot Disk Protection**: `DiskEnumerationService.GetCandidateDisks()` filters out disks marked as system or boot disks
-- **Elevated Operations**: Mount/unmount operations require Administrator privileges (UAC prompt)
-- **Filesystem Validation**: Mount script validates filesystem type against allowed list (ext4, xfs, btrfs, vfat)
+### Validation
+```
+❌ WRONG:
+// Validation scattered in executor, orchestrator, ViewModel
 
-### Known Limitations
+✅ RIGHT:
+// Validation once in orchestrator
+if (diskIndex < 0)
+{
+    return Result.CreateFailure("Disk index must be non-negative", "validation");
+}
+```
 
-- No automated unmount on application exit
-- Drive mappings are session-based (not persistent across reboots)
-- Single WSL distro auto-detection (first available distro)
-- Minimal error recovery for failed operations
-- No unit tests currently exist
+---
 
-### Script Path Resolution
+## 🧪 Testing Considerations
 
-`ScriptExecutor` searches for `scripts/` directory in multiple locations:
-1. `{AppDirectory}/scripts`
-2. `{AppDirectory}/../../../scripts` (for development builds)
-3. `{AppDirectory}/../../../../scripts`
-4. `{AppDirectory}/../../../../../scripts`
+### This is a Windows-Only Application
 
-When adding or modifying scripts, ensure they remain in the root `scripts/` directory.
+**Reality Check**: You're running on Linux, the app requires Windows.
 
-## Logging
+**What you CAN do**:
+- Create test project structure
+- Write unit tests with mocks
+- Test non-Windows-specific logic
+- Document test scenarios
 
-Application uses Serilog with conditional file logging:
-- **Debug Mode** (debugger attached): Logs to Debug output only
-- **Production Mode**: Logs to `%LocalAppData%\LiMount\logs\limount-{Date}.log`
-  - Rolling daily logs, retains last 7 days
-  - 10MB file size limit with rollover
-  - Configured in `App.xaml.cs` startup
+**What you CAN'T do**:
+- Run the actual WPF application
+- Test PowerShell script execution
+- Test WMI queries
+- Test actual mount/unmount operations
 
-To enable production logging in debug mode, set environment variable: `DOTNET_ENVIRONMENT=Production`
+**Approach**:
+```
+1. Create LiMount.Tests project
+2. Add xUnit, Moq, FluentAssertions
+3. Write tests for:
+   - Models (FromDictionary methods)
+   - Validation logic
+   - Configuration parsing
+   - Result object creation
+4. Mock interfaces for:
+   - IScriptExecutor
+   - IDiskEnumerationService
+   - IMountStateService
+5. Document integration tests that need Windows
+```
 
-## WSL Integration
+---
 
-### Mount Operation Flow
+## 📊 Decision Framework
 
-1. `wsl --mount \\.\PHYSICALDRIVE{Index} --partition {Partition} --type {FsType}`
-2. Detect mount path by querying `/mnt/wsl/` directory in WSL
-3. Build UNC path: `\\wsl$\{DistroName}{MountPathLinux}`
-4. Verify UNC accessibility with retry logic
-5. Map UNC to drive letter using `net use` or similar
+### Should This Be Configurable?
 
-### Unmount Operation Flow
+**YES** if:
+- Might need tuning for different environments
+- Could vary by user preference
+- Is a timeout/retry/limit value
+- Affects performance or behavior
 
-1. Remove drive letter mapping using Windows API
-2. `wsl --unmount \\.\PHYSICALDRIVE{Index}`
+**NO** if:
+- Is fundamental to the application
+- Would never change (e.g., Windows platform)
+- Is a UX string/label
+- Increases complexity without benefit
 
-### Requirements
+### Should This Be a Service?
 
-- Windows 11 Build 22000+ or Microsoft Store WSL version
-- WSL2 must be running (at least one distro)
-- Administrator privileges for mount/unmount operations
+**YES** if:
+- Has dependencies
+- Needs to be mocked for testing
+- Manages state or resources
+- Encapsulates complex logic
+- Will be reused across components
+
+**NO** if:
+- Is a simple data model (use class)
+- Is a pure utility function (use static)
+- Has no dependencies
+- Is UI-specific (use ViewModel)
+
+### Should This Be an Orchestrator?
+
+**YES** if:
+- Coordinates multiple services
+- Has multi-step workflow with error handling
+- Reports progress during operation
+- Implements retry logic
+- Combines results from multiple operations
+
+**NO** if:
+- Just executes one operation
+- No coordination needed
+- Better as part of existing orchestrator
+
+---
+
+## 🚀 Quick Start Checklist
+
+Before implementing ANY feature:
+
+- [ ] Read CLAUDE.md completely
+- [ ] Understand the existing architecture
+- [ ] Search for similar implementations
+- [ ] Plan the interfaces needed
+- [ ] Consider configuration needs
+- [ ] Think about state management
+- [ ] Design for testability
+- [ ] Plan incremental commits
+- [ ] Document as you go
+
+---
+
+## 💡 Pro Tips for AI Agents
+
+1. **Use TODO.md as Your Guide**: Check what's planned before suggesting new work
+
+2. **Commit Incrementally**: Don't wait until everything is perfect
+   ```bash
+   git commit -m "feat: add IMountStateService interface"
+   git commit -m "feat: implement MountStateService"
+   git commit -m "feat: integrate MountStateService in ViewModel"
+   ```
+
+3. **Read Before Writing**: Always use `Read` tool before `Edit` or `Write`
+
+4. **Search Broadly**: Use `Grep` with broad patterns first, then narrow down
+
+5. **Test Your Assumptions**: If unsure how something works, read the code
+
+6. **Ask for Clarification**: If user request is ambiguous, ask questions first
+
+7. **Think About Migration**: When refactoring, plan how existing code will migrate
+
+8. **Document Decisions**: Update CLAUDE.md when adding new patterns
+
+9. **Respect the Architecture**: When in doubt, follow existing patterns
+
+10. **Be Incremental**: Small, working changes > big, broken changes
+
+---
+
+## 📖 Required Reading
+
+Before working on this codebase, read these in order:
+
+1. **This file (AGENTS.md)**: You're here!
+2. **CLAUDE.md**: Architecture, patterns, principles
+3. **TODO.md**: Planned work, current status
+4. **README.md**: User-facing documentation
+
+---
+
+**Remember**: This codebase has learned from experience. The patterns exist for good reasons. Follow them, and you'll avoid the pitfalls we've already encountered.
+
+---
+
+**Version**: 1.0
+**Last Updated**: 2025-11-18
+**For**: AI Code Assistants working on LiMount

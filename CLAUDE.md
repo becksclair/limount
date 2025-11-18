@@ -261,3 +261,311 @@ To enable production logging in debug mode, set environment variable: `DOTNET_EN
 - Windows 11 Build 22000+ or Microsoft Store WSL version
 - WSL2 must be running (at least one distro)
 - Administrator privileges for mount/unmount operations
+
+## Design Principles & Best Practices
+
+### Core Architectural Principles
+
+1. **Dependency Injection First**: All services must be injected, never use `new` for services
+2. **Interface-Based Design**: Every service must have an interface for testability
+3. **Single Responsibility**: Each service should have one clear purpose
+4. **Result Objects Over Exceptions**: Use typed result objects for expected failures
+5. **Async All the Way**: All I/O operations must be async to keep UI responsive
+
+### State Management
+
+**IMPORTANT**: Mount state must be managed centrally, not in ViewModels.
+
+- **Use**: `IMountStateService` for tracking active mounts
+- **Persist**: State must survive application restarts
+- **Reconcile**: Always reconcile on startup to detect orphaned mounts
+- **Never**: Store mount state only in ViewModel properties
+
+**Example**:
+```csharp
+// WRONG: State lost on app close
+private int? _currentMountedDiskIndex;
+
+// RIGHT: State persisted and queryable
+var activeMount = await _mountStateService.GetMountForDiskAsync(diskIndex);
+```
+
+### Configuration Management
+
+**All tunable values must be in appsettings.json**:
+
+```csharp
+// WRONG: Hardcoded constant
+private const int Timeout = 5;
+
+// RIGHT: Configured value
+private readonly LiMountConfiguration _config;
+var timeout = _config.ScriptExecution.TempFilePollingTimeoutSeconds;
+```
+
+### Validation Strategy
+
+**Validate once, centrally**:
+
+- All validation logic belongs in orchestrators (before calling executors)
+- Return structured error results, don't throw exceptions for validation failures
+- Include parameter name in error message for debugging
+
+```csharp
+// In orchestrator
+if (diskIndex < 0)
+{
+    return MountAndMapResult.CreateFailure(
+        diskIndex, partition, 
+        "Disk index must be non-negative", 
+        "validation");
+}
+```
+
+### Testing Philosophy
+
+**Write tests BEFORE or WITH implementation**:
+
+1. **Unit Tests**: Mock all dependencies, test business logic
+2. **Integration Tests**: Test PowerShell scripts on real Windows
+3. **UI Tests**: Use `IDialogService` abstraction for testability
+
+**Example Test Structure**:
+```csharp
+[Fact]
+public async Task MountOrchestrator_InvalidDiskIndex_ReturnsValidationError()
+{
+    // Arrange
+    var mockExecutor = new Mock<IScriptExecutor>();
+    var orchestrator = new MountOrchestrator(mockExecutor.Object);
+    
+    // Act
+    var result = await orchestrator.MountAndMapAsync(-1, 1, 'Z');
+    
+    // Assert
+    Assert.False(result.Success);
+    Assert.Equal("validation", result.FailedStep);
+}
+```
+
+## Lessons Learned & Common Pitfalls
+
+### Critical Mistakes to Avoid
+
+1. **❌ Storing UI State in ViewModel Without Persistence**
+   - Problem: Mount state lost when app closes
+   - Solution: Use `IMountStateService` for all mount tracking
+   - Impact: Users can't see what's mounted after restart
+
+2. **❌ Hardcoding Timeout/Retry Values**
+   - Problem: Can't tune for different environments without recompiling
+   - Solution: Use `IOptions<LiMountConfiguration>` pattern
+   - Impact: Poor UX on slow systems, can't adjust for testing
+
+3. **❌ Direct MessageBox Calls in ViewModel**
+   - Problem: ViewModel becomes untestable
+   - Solution: Use `IDialogService` abstraction
+   - Impact: Can't write unit tests for confirmation flows
+
+4. **❌ Duplicate Validation Logic**
+   - Problem: Validation inconsistencies, maintenance burden
+   - Solution: Validate once in orchestrators
+   - Impact: Bugs from inconsistent validation
+
+5. **❌ Silent Exception Swallowing**
+   - Problem: Errors disappear, impossible to debug
+   - Solution: Always log exceptions, even if handled gracefully
+   - Impact: Production debugging nightmares
+
+### What Worked Well
+
+✅ **Orchestrator Pattern**: Clean separation of workflow from execution  
+✅ **Result Objects**: Better than exceptions for expected failures  
+✅ **Async/Await**: UI stays responsive during long operations  
+✅ **DI with Interfaces**: Makes everything testable  
+✅ **MVVM with Source Generators**: Minimal boilerplate  
+✅ **Structured Logging**: Serilog with file output for diagnostics  
+
+## Architectural Decisions & Rationale
+
+### Why Orchestrators Instead of Fat Services?
+
+**Decision**: Use separate orchestrator classes for complex workflows
+
+**Rationale**:
+- `ScriptExecutor` should only execute scripts, not orchestrate multi-step flows
+- Orchestrators provide progress reporting and retry logic
+- Easy to test workflows by mocking `IScriptExecutor`
+- Clear separation: Execution vs. Coordination
+
+### Why Result Objects Instead of Exceptions?
+
+**Decision**: Return typed result objects for all operations
+
+**Rationale**:
+- Mount failures are expected, not exceptional
+- Results can carry rich context (which step failed, error details)
+- Easier to test (no need to catch exceptions)
+- Forces caller to check success before using data
+
+### Why Singleton Services?
+
+**Decision**: `DiskEnumerationService`, `DriveLetterService`, `ScriptExecutor` are singletons
+
+**Rationale**:
+- No mutable state, safe to reuse
+- WMI queries are expensive, service can cache if needed
+- Reduces memory allocation pressure
+- Script path resolution only needs to happen once
+
+### Why Transient Orchestrators?
+
+**Decision**: `MountOrchestrator`, `UnmountOrchestrator` are transient
+
+**Rationale**:
+- Each operation is independent
+- No state to carry between operations
+- Cleaner lifecycle management
+- Easier to reason about concurrency
+
+## Future Improvements & Roadmap
+
+### High Priority (Should Implement Soon)
+
+1. **Environment Validation on Startup**
+   - Check WSL availability
+   - Verify Windows version compatibility
+   - Detect at least one WSL distro installed
+   - Show actionable error if environment invalid
+
+2. **Structured Progress Reporting**
+   - Replace `IProgress<string>` with `IProgress<MountProgressInfo>`
+   - Include step number, percent complete, estimated time
+   - Enable progress bar UI instead of just text
+
+3. **Automatic Retry for Transient Failures**
+   - Implement `IRetryPolicy` service
+   - Auto-retry UNC accessibility checks
+   - Configurable retry behavior per operation type
+
+### Medium Priority (Nice to Have)
+
+4. **Mount History UI**
+   - Display history in DataGrid
+   - Filter by success/failure
+   - Export history to CSV
+
+5. **Multiple Concurrent Mounts**
+   - Support mounting multiple disks simultaneously
+   - Track all active mounts
+   - Bulk unmount operation
+
+6. **Mount Verification**
+   - Periodic health checks for active mounts
+   - Detect and notify if mount becomes inaccessible
+   - Auto-cleanup stale mounts
+
+### Low Priority (Future Features)
+
+7. **Persistent Drive Mappings**
+   - Option to make mappings survive reboot
+   - Registry-based persistence
+   - Startup mount automation
+
+8. **Multi-Distro Support**
+   - Choose which WSL distro to mount into
+   - Mount same disk into multiple distros
+   - Distro-specific settings
+
+## Key Services Reference
+
+### Core Services (Must Use)
+
+| Service | Purpose | Lifetime | When to Use |
+|---------|---------|----------|-------------|
+| `IMountStateService` | Track active mounts | Singleton | Always query before mount/unmount |
+| `IMountHistoryService` | Log operation history | Singleton | Auto-logged by orchestrators |
+| `IDiskEnumerationService` | Find mountable disks | Singleton | On refresh, on startup |
+| `IDriveLetterService` | Find free drive letters | Singleton | Before mount, on refresh |
+| `IScriptExecutor` | Execute PowerShell | Singleton | Only via orchestrators |
+| `IMountOrchestrator` | Mount workflow | Transient | For mount operations |
+| `IUnmountOrchestrator` | Unmount workflow | Transient | For unmount operations |
+| `IDialogService` | Show user dialogs | Singleton | For all confirmations/alerts |
+
+### Configuration Access
+
+```csharp
+// Inject configuration
+public class MyService
+{
+    private readonly LiMountConfiguration _config;
+    
+    public MyService(IOptions<LiMountConfiguration> config)
+    {
+        _config = config.Value;
+    }
+    
+    public async Task DoSomething()
+    {
+        var timeout = _config.ScriptExecution.TempFilePollingTimeoutSeconds;
+        // Use configured value
+    }
+}
+```
+
+## Troubleshooting Guide
+
+### "No disks found"
+- Check WMI is working: `Get-WmiObject Win32_DiskDrive`
+- Verify user has permissions
+- Check logs: `%LocalAppData%\LiMount\logs\`
+
+### "Mount fails with timeout"
+- Increase `ScriptExecution.TempFilePollingTimeoutSeconds` in appsettings.json
+- Check if UAC dialog was dismissed
+- Verify script execution policy allows running PowerShell
+
+### "Drive mapping fails"
+- Check if drive letter already in use
+- Verify UNC path exists: `Test-Path \\wsl$\Ubuntu\...`
+- Increase `MountOperations.UncAccessibilityRetries`
+
+### "State lost after restart"
+- Verify `IMountStateService` is registered as singleton
+- Check state file exists: `%LocalAppData%\LiMount\mount-state.json`
+- Enable debug logging to see state operations
+
+## Contributing Guidelines
+
+### Before Starting Work
+
+1. Read this entire CLAUDE.md file
+2. Read AGENTS.md for AI-specific guidance
+3. Review existing similar implementations
+4. Check TODO.md for planned work
+5. Ensure change aligns with architecture principles
+
+### Code Review Checklist
+
+- [ ] All services injected via constructor
+- [ ] All services have interfaces
+- [ ] Configuration values not hardcoded
+- [ ] Error handling with logging
+- [ ] Parameter validation at orchestrator level
+- [ ] Unit tests written/updated
+- [ ] CLAUDE.md updated if adding patterns
+- [ ] XML documentation on public members
+
+### Git Workflow
+
+1. Create feature branch: `feature/short-description`
+2. Make incremental commits (not one massive commit)
+3. Write descriptive commit messages
+4. Test on Windows before pushing
+5. Create PR with clear description
+
+---
+
+**Last Updated**: 2025-11-18  
+**Version**: 2.0 (After architectural improvements)  
+**Status**: Production-ready with modern best practices
