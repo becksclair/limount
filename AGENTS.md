@@ -15,30 +15,42 @@ Before making ANY code changes, read `/home/user/limount/CLAUDE.md` completely. 
 - Common pitfalls to avoid
 
 ### 2. **Think Before Acting - "Ultrathink"**
-When asked to implement a feature:
+When asked to implement a feature, follow this enhanced process:
 
 **Step 1**: Analyze the Request
 - What is the user really trying to accomplish?
 - Does this fit the existing architecture?
 - What similar patterns exist in the codebase?
+- **NEW**: What mistakes from CLAUDE.md "Lessons Learned" apply here?
 
-**Step 2**: Plan the Implementation
-- Which services/interfaces are involved?
-- What new files need to be created?
-- What existing files need modification?
-- How will this integrate with DI?
+**Step 2**: Design First (Before Any Code)
+- What interfaces are needed?
+- What configuration values should be tunable?
+- What state needs to persist vs. what's transient UI state?
+- How will this be tested? (Design for testability!)
+- Which services/orchestrators coordinate the workflow?
 
-**Step 3**: Consider Implications
-- Does this need configuration? (appsettings.json)
-- Does this need persistence? (IMountStateService or IMountHistoryService)
-- Does this need testing? (always yes!)
-- Are there security implications?
+**Step 3**: Write Tests FIRST (TDD)
+- Write failing tests that define the contract
+- Start with happy path, then edge cases
+- Mock all dependencies
+- Verify tests fail for the right reason
 
-**Step 4**: Execute Incrementally
-- Create interfaces first
-- Implement one service at a time
-- Test as you go
-- Commit frequently
+**Step 4**: Implement Minimally (Make Tests Pass)
+- Write just enough code to pass tests
+- Don't add features not covered by tests
+- Keep it simple
+
+**Step 5**: Refactor and Integrate
+- Clean up implementation
+- Register in DI
+- Add XML documentation
+- Update CLAUDE.md if new patterns emerge
+
+**Step 6**: Commit Incrementally
+- Commit after each stable point
+- Small commits with clear messages
+- Don't batch unrelated changes
 
 ### 3. **Never Violate Architecture Principles**
 These are **RULES**, not suggestions:
@@ -60,40 +72,277 @@ These are **RULES**, not suggestions:
 
 ---
 
+## 🧪 Test-Driven Development (TDD) Methodology
+
+### The RED-GREEN-REFACTOR Cycle
+
+**CRITICAL**: Always write tests BEFORE implementation. This is non-negotiable.
+
+#### Phase 1: RED (Write Failing Test)
+
+```csharp
+// Example: Adding validation to MountOrchestrator
+[Fact]
+public async Task MountOrchestrator_NegativeDiskIndex_ReturnsValidationError()
+{
+    // Arrange
+    var mockExecutor = new Mock<IScriptExecutor>();
+    var mockStateService = new Mock<IMountStateService>();
+    var mockHistoryService = new Mock<IMountHistoryService>();
+    var config = Options.Create(new LiMountConfiguration());
+
+    var orchestrator = new MountOrchestrator(
+        mockExecutor.Object,
+        mockStateService.Object,
+        mockHistoryService.Object,
+        config,
+        null);
+
+    // Act
+    var result = await orchestrator.MountAndMapAsync(-1, 1, 'Z');
+
+    // Assert
+    result.Success.Should().BeFalse();
+    result.FailedStep.Should().Be("validation");
+    result.ErrorMessage.Should().Contain("Disk index");
+}
+```
+
+**Run the test** - It should FAIL because validation doesn't exist yet.
+
+#### Phase 2: GREEN (Make Test Pass)
+
+```csharp
+public async Task<MountAndMapResult> MountAndMapAsync(
+    int diskIndex,
+    int partition,
+    char driveLetter)
+{
+    // Add MINIMAL code to pass the test
+    if (diskIndex < 0)
+    {
+        _logger.LogWarning("Invalid disk index: {DiskIndex}", diskIndex);
+        return MountAndMapResult.CreateFailure(
+            diskIndex,
+            partition,
+            "Disk index must be non-negative",
+            "validation");
+    }
+
+    // ... rest of implementation
+}
+```
+
+**Run the test** - It should PASS.
+
+#### Phase 3: REFACTOR (Improve Code Quality)
+
+```csharp
+// Extract validation to separate method
+private MountAndMapResult? ValidateParameters(int diskIndex, int partition, char driveLetter)
+{
+    if (diskIndex < 0)
+    {
+        _logger.LogWarning("Invalid disk index: {DiskIndex}", diskIndex);
+        return MountAndMapResult.CreateFailure(
+            diskIndex, partition,
+            "Disk index must be non-negative",
+            "validation");
+    }
+
+    if (partition < 1)
+    {
+        _logger.LogWarning("Invalid partition number: {Partition}", partition);
+        return MountAndMapResult.CreateFailure(
+            diskIndex, partition,
+            "Partition number must be positive",
+            "validation");
+    }
+
+    if (!char.IsLetter(driveLetter))
+    {
+        _logger.LogWarning("Invalid drive letter: {DriveLetter}", driveLetter);
+        return MountAndMapResult.CreateFailure(
+            diskIndex, partition,
+            "Drive letter must be a letter",
+            "validation");
+    }
+
+    return null; // Validation passed
+}
+
+public async Task<MountAndMapResult> MountAndMapAsync(...)
+{
+    var validationError = ValidateParameters(diskIndex, partition, driveLetter);
+    if (validationError != null)
+    {
+        return validationError;
+    }
+
+    // ... rest of implementation
+}
+```
+
+**Run ALL tests** - They should still pass after refactoring.
+
+### TDD Best Practices for AI Agents
+
+1. **Write Tests in This Order**:
+   - ✅ Happy path (normal success case)
+   - ✅ Validation errors (invalid inputs)
+   - ✅ Edge cases (boundary conditions)
+   - ✅ Error conditions (exceptions, failures)
+
+2. **Always Mock Dependencies**:
+   ```csharp
+   // GOOD: Dependencies are mocked
+   var mockExecutor = new Mock<IScriptExecutor>();
+   mockExecutor.Setup(x => x.ExecuteMountScriptAsync(...))
+              .ReturnsAsync(MountResult.CreateSuccess(...));
+
+   // BAD: Using real services in unit tests
+   var executor = new ScriptExecutor(...); // NO!
+   ```
+
+3. **One Assertion Per Test (Ideally)**:
+   ```csharp
+   // GOOD: Tests one thing
+   [Fact]
+   public async Task Mount_InvalidDiskIndex_ReturnsError()
+   {
+       var result = await orchestrator.MountAndMapAsync(-1, 1, 'Z');
+       result.Success.Should().BeFalse();
+   }
+
+   // ACCEPTABLE: Related assertions about the same behavior
+   [Fact]
+   public async Task Mount_InvalidDiskIndex_ReturnsValidationError()
+   {
+       var result = await orchestrator.MountAndMapAsync(-1, 1, 'Z');
+       result.Success.Should().BeFalse();
+       result.FailedStep.Should().Be("validation");
+       result.ErrorMessage.Should().Contain("Disk index");
+   }
+
+   // BAD: Testing multiple unrelated things
+   [Fact]
+   public async Task Mount_VariousScenarios()
+   {
+       // Tests 10 different things - split into separate tests!
+   }
+   ```
+
+4. **Test Names Should Be Descriptive**:
+   ```csharp
+   // GOOD: Clear what's being tested
+   [Fact]
+   public async Task MountOrchestrator_NegativeDiskIndex_ReturnsValidationError()
+
+   // BAD: Unclear what's being tested
+   [Fact]
+   public async Task TestMount()
+   ```
+
+5. **Use AAA Pattern (Arrange-Act-Assert)**:
+   ```csharp
+   [Fact]
+   public async Task Example()
+   {
+       // Arrange - Set up test data and mocks
+       var mock = new Mock<IService>();
+       var sut = new SystemUnderTest(mock.Object);
+
+       // Act - Execute the operation
+       var result = await sut.DoSomethingAsync();
+
+       // Assert - Verify the outcome
+       result.Should().BeTrue();
+   }
+   ```
+
+### When You Can't Run Tests (Linux Environment)
+
+**Reality**: You're on Linux, this is a Windows-only WPF app.
+
+**What to do**:
+1. **Write the tests anyway** - They'll run on Windows
+2. **Document test scenarios** - In comments if code won't compile
+3. **Focus on testable logic** - Models, validation, parsing
+4. **Mock Windows-specific APIs** - Test orchestration logic, not WMI/PowerShell
+
+**Example of documenting tests you can't run**:
+```csharp
+// NOTE: This test requires Windows to execute
+// Test Scenario: When DiskEnumerationService queries WMI, it should filter system disks
+// Expected: System/Boot disks are excluded from results
+//
+// [Fact]
+// public async Task DiskEnumerationService_GetCandidateDisks_ExcludesSystemDisks()
+// {
+//     // Would test this on Windows CI/CD
+// }
+```
+
+---
+
 ## 🔍 Problem-Solving Methodology
 
 ### When Adding a New Feature
+
+**IMPORTANT**: Follow this exact order. Don't skip steps!
 
 ```
 1. EXPLORE: What exists?
    - Search for similar features: `Grep` tool
    - Find related services: `Glob` tool
    - Read existing implementations: `Read` tool
+   - Review CLAUDE.md "Lessons Learned" section
 
-2. DESIGN: How should it work?
+2. DESIGN: Plan before coding
    - Interface: What contract is needed?
-   - Implementation: Where does logic live?
+   - Configuration: What should be tunable? (appsettings.json)
+   - State: What persists vs. what's transient? (Service vs. ViewModel)
+   - Implementation: Where does logic live? (Service vs. Orchestrator)
    - Integration: How to wire into DI?
-   - Configuration: What should be tunable?
 
-3. IMPLEMENT: Build it right
+3. TEST-FIRST: Write failing tests (TDD RED)
+   - Create test file in `LiMount.Tests/Services/`
+   - Write test for interface contract
+   - Write tests for validation rules
+   - Write tests for error conditions
+   - **Run tests** - They should FAIL (no implementation yet)
+
+4. IMPLEMENT: Make tests pass (TDD GREEN)
    - Create interface in `LiMount.Core/Interfaces/`
+   - Add configuration in `LiMount.Core/Configuration/` if needed
+   - Update `appsettings.json` with default values if needed
    - Implement service in `LiMount.Core/Services/`
    - Add model if needed in `LiMount.Core/Models/`
-   - Add configuration in `LiMount.Core/Configuration/` if needed
+   - Write MINIMAL code to pass tests
+   - **Run tests** - They should PASS
+
+5. REFACTOR: Clean up (TDD REFACTOR)
+   - Extract helper methods
+   - Improve naming
+   - Add XML documentation
    - Register in `App.xaml.cs` DI
-   - Update `appsettings.json` if needed
+   - **Run tests** - Still passing?
 
-4. TEST: Verify it works
-   - Create unit tests (or document why you can't on Linux)
-   - Test happy path
-   - Test error cases
-   - Test edge cases
+6. INTEGRATE: Connect to UI/features
+   - Inject into ViewModels or orchestrators
+   - Wire up commands/bindings
+   - Test manually in running app (on Windows)
 
-5. DOCUMENT: Help future developers
-   - Add XML comments
-   - Update CLAUDE.md if adding patterns
+7. DOCUMENT: Help future developers
+   - Add XML comments on public members
+   - Update CLAUDE.md if adding new patterns
    - Update TODO.md if completing tasks
+   - Commit with clear message
+
+8. COMMIT: Save your work
+   - Commit after each stable point
+   - Don't batch unrelated changes
+   - Use conventional commit format (feat:, fix:, refactor:)
 ```
 
 ### When Fixing a Bug
@@ -498,19 +747,292 @@ if (diskIndex < 0)
 
 ---
 
+## ⚠️ Common Mistakes for AI Agents
+
+Learn from our experience. These mistakes were made during LiMount development. DON'T REPEAT THEM!
+
+### Mistake #1: Test-Last Development
+
+**What AI agents often do**:
+```
+User: "Add feature X"
+Agent: *immediately writes implementation*
+Agent: *maybe adds tests at the end if reminded*
+```
+
+**Why it's wrong**:
+- Tests feel like afterthought, are incomplete
+- Code designed for implementation, not testability
+- Bugs that TDD would catch slip through
+- Hard to retrofit tests onto untestable code
+
+**What you SHOULD do**:
+1. Design interface
+2. Write failing test
+3. Implement minimal code to pass
+4. Refactor
+5. Repeat
+
+**Red flag**: If you're writing implementation code before any tests exist, STOP!
+
+### Mistake #2: Hardcoding Configuration Values
+
+**What AI agents often do**:
+```csharp
+// "I'll make it configurable later"
+private const int TIMEOUT_SECONDS = 5;
+private const int MAX_RETRIES = 3;
+```
+
+**Why it's wrong**:
+- "Later" never comes
+- Can't tune for different environments without recompiling
+- Users can't adjust behavior
+- Testing becomes inflexible
+
+**What you SHOULD do**:
+```csharp
+// Add to LiMountConfiguration FIRST
+public class MyFeatureConfig
+{
+    public int TimeoutSeconds { get; set; } = 5;
+    public int MaxRetries { get; set; } = 3;
+}
+
+// Then use in service
+public MyService(IOptions<LiMountConfiguration> config)
+{
+    _timeout = config.Value.MyFeature.TimeoutSeconds;
+}
+```
+
+**Red flag**: Any literal numbers in business logic code!
+
+### Mistake #3: Storing State Only in ViewModel
+
+**What AI agents often do**:
+```csharp
+public class MainViewModel
+{
+    private int? _currentMountedDisk; // Lost on app close!
+    private char? _currentDriveLetter; // Lost on app close!
+}
+```
+
+**Why it's wrong**:
+- State lost when app closes
+- Can't detect orphaned mounts on startup
+- Multiple instances don't share state
+- Can't reconcile with actual system state
+
+**What you SHOULD do**:
+```csharp
+// Use persistent state service
+var mount = await _mountStateService.GetMountForDiskAsync(diskIndex);
+
+// State survives restarts, can be reconciled
+```
+
+**Red flag**: Properties in ViewModel that track operational state (not just UI state)!
+
+### Mistake #4: Direct MessageBox Calls
+
+**What AI agents often do**:
+```csharp
+var result = MessageBox.Show("Are you sure?", "Confirm", MessageBoxButton.YesNo);
+if (result == MessageBoxResult.Yes)
+{
+    // Do something
+}
+```
+
+**Why it's wrong**:
+- ViewModel becomes completely untestable
+- Can't mock dialogs in tests
+- Tight coupling to UI framework
+- Hard to automate or script
+
+**What you SHOULD do**:
+```csharp
+// Inject IDialogService
+private readonly IDialogService _dialogService;
+
+// Use abstraction
+var confirmed = await _dialogService.ConfirmAsync("Are you sure?", "Confirm");
+if (confirmed)
+{
+    // Do something - TESTABLE!
+}
+```
+
+**Red flag**: `MessageBox.Show` anywhere in ViewModel or service code!
+
+### Mistake #5: Scattered Validation Logic
+
+**What AI agents often do**:
+```csharp
+// Validation in ViewModel
+if (SelectedDisk == null) return;
+
+// Validation in Orchestrator
+if (diskIndex < 0) return error;
+
+// Validation in Executor
+if (string.IsNullOrEmpty(distro)) throw new Exception();
+
+// Validation in PowerShell script
+if ($diskIndex -lt 0) { exit 1 }
+```
+
+**Why it's wrong**:
+- Inconsistent error messages
+- Duplicate logic
+- Hard to maintain (change validation = change 4 places)
+- Different layers have different validation rules
+
+**What you SHOULD do**:
+```csharp
+// Validate ONCE in orchestrator (before calling executor)
+public async Task<MountResult> MountAsync(...)
+{
+    // All validation here
+    if (diskIndex < 0)
+        return MountResult.Failure("Disk index must be non-negative");
+    if (partition < 1)
+        return MountResult.Failure("Partition must be positive");
+    if (!ValidateDriveLetter(driveLetter))
+        return MountResult.Failure("Invalid drive letter");
+
+    // Executor trusts orchestrator validated everything
+    return await _executor.ExecuteMountAsync(diskIndex, partition, driveLetter);
+}
+```
+
+**Red flag**: Validation logic in multiple layers!
+
+### Mistake #6: Silent Exception Swallowing
+
+**What AI agents often do**:
+```csharp
+try
+{
+    await DoSomethingAsync();
+}
+catch (Exception)
+{
+    // Ignore - *poof* error disappears
+}
+```
+
+**Why it's wrong**:
+- Impossible to debug production issues
+- User gets no feedback
+- Errors propagate silently
+- Log files are useless
+
+**What you SHOULD do**:
+```csharp
+try
+{
+    await DoSomethingAsync();
+}
+catch (Exception ex)
+{
+    _logger.LogError(ex, "Failed to do something with {Context}", context);
+    return Result.Failure($"Operation failed: {ex.Message}");
+}
+```
+
+**Red flag**: Empty catch blocks or catch without logging!
+
+### Mistake #7: Creating Services with `new`
+
+**What AI agents often do**:
+```csharp
+public class MyViewModel
+{
+    private readonly IDiskService _diskService = new DiskService(); // NO!
+}
+```
+
+**Why it's wrong**:
+- Can't mock for testing
+- Violates Dependency Injection principle
+- Hard to swap implementations
+- Tight coupling
+
+**What you SHOULD do**:
+```csharp
+public class MyViewModel
+{
+    private readonly IDiskService _diskService;
+
+    public MyViewModel(IDiskService diskService) // Injected
+    {
+        _diskService = diskService ?? throw new ArgumentNullException(nameof(diskService));
+    }
+}
+```
+
+**Red flag**: `new SomeService()` anywhere except DI registration!
+
+### Mistake #8: Massive "Do Everything" Commits
+
+**What AI agents often do**:
+```bash
+git commit -m "Add feature X"
+# Changed files: 47 files, +2847 lines, -312 lines
+```
+
+**Why it's wrong**:
+- Impossible to review
+- Can't bisect to find bugs
+- Can't cherry-pick individual improvements
+- Loses valuable development history
+
+**What you SHOULD do**:
+```bash
+git commit -m "feat: add IMountStateService interface"
+git commit -m "feat: implement MountStateService with JSON persistence"
+git commit -m "feat: add mount state tests"
+git commit -m "feat: integrate MountStateService in MainViewModel"
+git commit -m "docs: update CLAUDE.md with state management pattern"
+```
+
+**Red flag**: Commit touching more than 10 files or adding more than 200 lines!
+
+### Quick Mistake Checklist
+
+Before committing ANY code, check:
+
+- [ ] Did I write tests BEFORE implementation?
+- [ ] Are all timeout/retry/limit values configurable?
+- [ ] Is persistent state in a service, not ViewModel?
+- [ ] Am I using IDialogService instead of MessageBox?
+- [ ] Is validation in ONE place (orchestrator)?
+- [ ] Are all exceptions logged with context?
+- [ ] Are all dependencies injected via constructor?
+- [ ] Is this a small, focused commit?
+
+If ANY answer is "No", FIX IT before committing!
+
+---
+
 ## 🚀 Quick Start Checklist
 
 Before implementing ANY feature:
 
-- [ ] Read CLAUDE.md completely
-- [ ] Understand the existing architecture
-- [ ] Search for similar implementations
-- [ ] Plan the interfaces needed
-- [ ] Consider configuration needs
-- [ ] Think about state management
-- [ ] Design for testability
-- [ ] Plan incremental commits
-- [ ] Document as you go
+- [ ] Read CLAUDE.md completely (especially "Lessons Learned" section)
+- [ ] Read "Common Mistakes for AI Agents" section above
+- [ ] Understand the existing architecture (search for similar code)
+- [ ] **DESIGN FIRST**: Plan interfaces, configuration, state management
+- [ ] **TESTS FIRST**: Write failing tests (TDD RED)
+- [ ] **IMPLEMENT**: Make tests pass (TDD GREEN)
+- [ ] **REFACTOR**: Clean up code (TDD REFACTOR)
+- [ ] Register in DI (App.xaml.cs)
+- [ ] Add XML documentation
+- [ ] Commit incrementally (small, focused commits)
+- [ ] Update CLAUDE.md if adding new patterns
 
 ---
 
@@ -558,6 +1080,9 @@ Before working on this codebase, read these in order:
 
 ---
 
-**Version**: 1.0
+**Version**: 2.0 (Major Update: Added TDD Methodology & Common Mistakes)
 **Last Updated**: 2025-11-18
 **For**: AI Code Assistants working on LiMount
+**Changelog**:
+- v2.0: Added TDD methodology, enhanced ultrathink process, added common mistakes section
+- v1.0: Initial version with core directives and patterns

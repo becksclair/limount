@@ -38,7 +38,7 @@ dotnet build LiMount.App
 
 ### Development Notes
 
-- No automated tests currently exist in the project
+- **Testing**: Comprehensive unit test project exists in `LiMount.Tests/` with 27+ tests
 - Application requires Administrator elevation for mounting operations
 - The application creates logs at: `%LocalAppData%\LiMount\logs\limount-*.log` (production mode only)
 - PowerShell scripts are located in `scripts/` directory and must be accessible at runtime
@@ -46,16 +46,22 @@ dotnet build LiMount.App
 ## Project Structure
 
 ```
-LiMount.sln              # Solution file with 2 projects
+LiMount.sln              # Solution file with 3 projects
 ├── LiMount.Core/        # Core library (Windows-only .NET 8)
+│   ├── Configuration/   # Configuration models for IOptions<T>
 │   ├── Interfaces/      # Service contracts
 │   ├── Models/          # Data transfer objects and results
 │   └── Services/        # Business logic and WMI/PowerShell interactions
 ├── LiMount.App/         # WPF application (Windows-only .NET 8)
+│   ├── Services/        # App-specific services (DialogService)
 │   ├── ViewModels/      # MVVM ViewModels
+│   ├── Views/           # Additional windows (HistoryWindow)
 │   ├── Converters/      # WPF value converters
 │   ├── MainWindow.xaml  # Main UI
-│   └── App.xaml.cs      # DI configuration and startup
+│   ├── App.xaml.cs      # DI configuration and startup
+│   └── appsettings.json # Application configuration
+├── LiMount.Tests/       # Unit test project (.NET 8)
+│   └── Services/        # Service tests (xUnit + Moq + FluentAssertions)
 └── scripts/             # PowerShell helper scripts
     ├── Mount-LinuxDiskCore.ps1    # Elevated: WSL mount
     ├── Map-WSLShareToDrive.ps1    # Non-elevated: Drive mapping
@@ -217,8 +223,7 @@ Each result class has `FromDictionary()` static method for parsing script output
 - No automated unmount on application exit
 - Drive mappings are session-based (not persistent across reboots)
 - Single WSL distro auto-detection (first available distro)
-- Minimal error recovery for failed operations
-- No unit tests currently exist
+- Integration tests require Windows environment (can't run on Linux CI)
 
 ### Script Path Resolution
 
@@ -348,34 +353,376 @@ public async Task MountOrchestrator_InvalidDiskIndex_ReturnsValidationError()
 }
 ```
 
+## Development Process & Best Practices
+
+### Recommended Development Order
+
+When building a new feature, follow this sequence to avoid common pitfalls:
+
+**Phase 1: Design & Planning (Before Any Code)**
+1. **Define Requirements** - What problem are we solving?
+2. **Design Interfaces** - What contracts are needed?
+3. **Plan Configuration** - What should be tunable?
+4. **Consider State** - Does this need persistence?
+5. **Think About Testing** - How will we verify it works?
+
+**Phase 2: Infrastructure First (Foundation)**
+1. **Create Configuration Schema** - Add to `LiMountConfiguration.cs` and `appsettings.json`
+2. **Define Interfaces** - Create in `LiMount.Core/Interfaces/`
+3. **Create Models** - Add result objects in `LiMount.Core/Models/`
+4. **Write Tests** - Start with test structure even if not runnable yet
+
+**Phase 3: Implementation (Build)**
+1. **Implement Services** - Follow existing patterns
+2. **Register in DI** - Update `App.xaml.cs`
+3. **Integrate into ViewModels** - Wire up commands
+4. **Update UI** - Add XAML bindings
+
+**Phase 4: Verification (Test)**
+1. **Unit Tests** - Test business logic with mocks
+2. **Manual Testing** - Run on Windows, verify behavior
+3. **Document** - Update CLAUDE.md if adding patterns
+
+**Example: Adding Environment Validation**
+
+✅ **Correct Order:**
+```
+1. Design: Need to check WSL, distros, Windows version
+2. Config: No config needed (always validate)
+3. Interface: IEnvironmentValidationService
+4. Model: EnvironmentValidationResult with errors/suggestions
+5. Tests: Write test cases (even if can't run on Linux)
+6. Implement: EnvironmentValidationService
+7. Register: Add to DI
+8. Integrate: Call during InitializeAsync
+9. UI: Show error dialog with actionable messages
+```
+
+❌ **Wrong Order:**
+```
+1. Start writing service code immediately
+2. Realize need to add configuration mid-way
+3. Hardcode values "temporarily"
+4. Forget to add tests
+5. Ship with hardcoded values still in place
+```
+
+### Test-Driven Development (TDD)
+
+**Philosophy**: Write tests BEFORE or WITH implementation, not after.
+
+**Why TDD Matters:**
+- Tests drive better API design
+- Catches bugs during development, not in production
+- Documents expected behavior
+- Enables confident refactoring
+- Forces thinking about edge cases
+
+**TDD Cycle for LiMount:**
+
+```
+1. RED: Write a failing test
+   [Fact]
+   public async Task MountOrchestrator_NegativeDiskIndex_ReturnsValidationError()
+   {
+       var result = await orchestrator.MountAndMapAsync(-1, 1, 'Z');
+       result.Success.Should().BeFalse();
+       result.FailedStep.Should().Be("validation");
+   }
+
+2. GREEN: Write minimal code to pass
+   if (diskIndex < 0)
+   {
+       return MountAndMapResult.CreateFailure(diskIndex, partition,
+           "Disk index must be non-negative", "validation");
+   }
+
+3. REFACTOR: Improve code quality
+   - Extract validation method
+   - Add logging
+   - Improve error message
+```
+
+**Testing Strategy:**
+
+| Test Type | Purpose | When | Tools |
+|-----------|---------|------|-------|
+| **Unit Tests** | Test business logic in isolation | During development | xUnit, Moq, FluentAssertions |
+| **Integration Tests** | Test PowerShell scripts on real Windows | Before release | xUnit, real environment |
+| **Manual Tests** | Verify UI behavior | Before release | Windows machine |
+
+**Coverage Goals:**
+- Unit Test Coverage: 80%+ of business logic
+- Integration Test Coverage: All PowerShell scripts
+- Critical Path Coverage: 100% of mount/unmount workflows
+
+### Configuration-First Approach
+
+**Rule**: All tunable values go in `appsettings.json` from day one.
+
+**Before Writing Any Service:**
+
+1. **Identify Tunable Values**
+   - Timeouts
+   - Retry counts
+   - Delays
+   - File paths
+   - Limits
+
+2. **Add to Configuration**
+   ```csharp
+   // LiMount.Core/Configuration/LiMountConfiguration.cs
+   public class MyFeatureConfig
+   {
+       public int MaxRetries { get; set; } = 3;
+       public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
+   }
+   ```
+
+3. **Update appsettings.json**
+   ```json
+   {
+     "LiMount": {
+       "MyFeature": {
+         "MaxRetries": 3,
+         "Timeout": "00:00:30"
+       }
+     }
+   }
+   ```
+
+4. **Then Inject into Service**
+   ```csharp
+   public MyService(IOptions<LiMountConfiguration> config)
+   {
+       _maxRetries = config.Value.MyFeature.MaxRetries;
+   }
+   ```
+
+**Benefits:**
+- No recompilation needed to tune
+- Different configs for dev/test/prod
+- Testable (inject test config)
+- User can customize
+
+### State Management First
+
+**Rule**: Design state persistence BEFORE building features that need it.
+
+**Questions to Ask:**
+- Does this state need to survive app restart? → Use `IMountStateService`
+- Is this historical data? → Use `IMountHistoryService`
+- Is this transient UI state? → ViewModel property is OK
+
+**State Design Checklist:**
+- [ ] Identified what needs persistence
+- [ ] Designed state model (e.g., `ActiveMount`)
+- [ ] Chose storage mechanism (JSON file)
+- [ ] Defined service interface (`IMountStateService`)
+- [ ] Implemented persistence layer
+- [ ] Registered in DI
+- [ ] Added reconciliation logic
+- [ ] **Then** built features that use it
+
+**Anti-Pattern:**
+```csharp
+// ❌ State in ViewModel only - lost on restart!
+public class MainViewModel
+{
+    private int? _currentMountedDiskIndex;
+}
+```
+
+**Correct Pattern:**
+```csharp
+// ✅ State in service - persists across restarts
+public class MainViewModel
+{
+    private readonly IMountStateService _stateService;
+
+    public async Task<bool> IsMountedAsync(int diskIndex)
+    {
+        return await _stateService.IsDiskMountedAsync(diskIndex);
+    }
+}
+```
+
+### Incremental Commits
+
+**Rule**: Commit small, working changes frequently.
+
+**Commit Granularity:**
+
+✅ **Good:**
+```bash
+git commit -m "feat: add IEnvironmentValidationService interface"
+git commit -m "feat: add EnvironmentValidationResult model"
+git commit -m "feat: implement EnvironmentValidationService"
+git commit -m "feat: register environment validation in DI"
+git commit -m "feat: integrate environment validation into startup"
+git commit -m "test: add environment validation tests"
+```
+
+❌ **Bad:**
+```bash
+git commit -m "add environment validation feature"  # One massive commit
+```
+
+**Why This Matters:**
+- Easy to review
+- Easy to revert specific changes
+- Clear history for debugging
+- Documents thought process
+- Enables bisecting bugs
+
+### Code Review Before Merge
+
+**Self-Review Checklist:**
+
+**Architecture Compliance:**
+- [ ] All services have interfaces
+- [ ] All dependencies injected via constructor
+- [ ] No hardcoded configuration values
+- [ ] State management uses appropriate service
+- [ ] Validation in orchestrators, not scattered
+
+**Code Quality:**
+- [ ] XML documentation on public members
+- [ ] Error handling with logging
+- [ ] Async/await for all I/O
+- [ ] Result objects for operations
+- [ ] No silent exception swallowing
+
+**Testing:**
+- [ ] Unit tests written/updated
+- [ ] Edge cases covered
+- [ ] Error cases tested
+- [ ] Integration test needs documented
+
+**Documentation:**
+- [ ] CLAUDE.md updated if adding patterns
+- [ ] README updated if user-facing
+- [ ] Commit messages descriptive
+- [ ] Code comments for complex logic
+
 ## Lessons Learned & Common Pitfalls
 
-### Critical Mistakes to Avoid
+### Critical Mistakes We Made (And How We Fixed Them)
 
-1. **❌ Storing UI State in ViewModel Without Persistence**
+These are real mistakes made during development of LiMount, documented so you don't repeat them:
+
+#### 1. **❌ Test-Last Instead of Test-First**
+
+**What Happened:**
+- Built all features first, added tests at the end
+- Had to retrofit tests onto existing code
+- Tests felt like an afterthought
+
+**The Problem:**
+- Missed bugs that TDD would have caught
+- APIs designed for implementation, not testability
+- Tests document behavior AFTER it was written
+
+**How We Fixed It:**
+- Created comprehensive test project with 27+ tests
+- Added xUnit, Moq, FluentAssertions
+- Documented TDD process above
+
+**Lesson Learned:** Write tests BEFORE or WITH implementation. Tests should drive API design, not document it afterwards.
+
+#### 2. **❌ State Management as an Afterthought**
+
+**What Happened:**
+- Started with mount state in ViewModel only
+- Users lost all state when app restarted
+- Had to refactor to add `MountStateService` later
+
+**The Problem:**
+- Poor UX (users couldn't see what was mounted)
+- Breaking change to existing ViewModels
+- Could have been designed right from the start
+
+**How We Fixed It:**
+- Created `IMountStateService` with JSON persistence
+- Created `ActiveMount` model for state tracking
+- Integrated into ViewModels properly
+
+**Lesson Learned:** Design state persistence BEFORE building features. Ask "does this need to survive restart?" immediately.
+
+#### 3. **❌ Environment Validation Added Last**
+
+**What Happened:**
+- Built disk enumeration, mounting, unmounting first
+- Added environment validation at the very end
+- Users could waste time if WSL wasn't installed
+
+**The Problem:**
+- User frustration: "Why doesn't it work?" → "Oh, WSL isn't installed"
+- Debugging time wasted on environment issues
+
+**How We Fixed It:**
+- Created `IEnvironmentValidationService`
+- Added comprehensive checks (WSL, distros, Windows version)
+- Integrated into startup with actionable error messages
+
+**Lesson Learned:** Environment validation should be the FIRST feature, not the last. Validate upfront, fail fast.
+
+#### 4. **❌ Configuration Hardcoded Then Extracted**
+
+**What Happened:**
+- Started with constants in services (`const int retries = 5`)
+- Had to refactor to extract to appsettings.json
+- Updated multiple service constructors
+
+**The Problem:**
+- Can't tune without recompiling
+- Breaking change to add configuration
+- "Temporary" hardcoded values become permanent
+
+**How We Fixed It:**
+- Created `LiMountConfiguration` hierarchy
+- Added `appsettings.json` with all tunable values
+- Updated all services to use `IOptions<T>`
+
+**Lesson Learned:** All tunable values go in configuration FROM DAY ONE. No exceptions.
+
+#### 5. **❌ Storing UI State in ViewModel Without Persistence**
    - Problem: Mount state lost when app closes
    - Solution: Use `IMountStateService` for all mount tracking
    - Impact: Users can't see what's mounted after restart
+   - **Status**: ✅ Fixed with persistent state service
 
-2. **❌ Hardcoding Timeout/Retry Values**
-   - Problem: Can't tune for different environments without recompiling
-   - Solution: Use `IOptions<LiMountConfiguration>` pattern
-   - Impact: Poor UX on slow systems, can't adjust for testing
-
-3. **❌ Direct MessageBox Calls in ViewModel**
+#### 6. **❌ Direct MessageBox Calls in ViewModel**
    - Problem: ViewModel becomes untestable
    - Solution: Use `IDialogService` abstraction
    - Impact: Can't write unit tests for confirmation flows
+   - **Status**: ✅ Fixed with `IDialogService`
 
-4. **❌ Duplicate Validation Logic**
+#### 7. **❌ Duplicate Validation Logic**
    - Problem: Validation inconsistencies, maintenance burden
    - Solution: Validate once in orchestrators
    - Impact: Bugs from inconsistent validation
+   - **Status**: ✅ Fixed, all validation in orchestrators
 
-5. **❌ Silent Exception Swallowing**
+#### 8. **❌ Silent Exception Swallowing**
    - Problem: Errors disappear, impossible to debug
    - Solution: Always log exceptions, even if handled gracefully
    - Impact: Production debugging nightmares
+   - **Status**: ✅ Fixed with comprehensive logging
+
+### What We Got Right
+
+These patterns worked exceptionally well and should be continued:
+
+✅ **Interface-Based Design** - Made testing trivial, enabled mocking
+✅ **Dependency Injection Throughout** - Clean, testable, maintainable
+✅ **Result Objects Over Exceptions** - Explicit error handling, easier testing
+✅ **Orchestrator Pattern** - Clean separation of workflow from execution
+✅ **Async/Await Everywhere** - UI stayed responsive
+✅ **Dialog Service Abstraction** - ViewModels fully testable
+✅ **MVVM with Source Generators** - Minimal boilerplate
+✅ **Structured Logging** - Serilog with file output for diagnostics
+✅ **Incremental Git Commits** - Clear history for debugging
 
 ### What Worked Well
 
