@@ -28,7 +28,13 @@ public class MountStateService : IMountStateService, IDisposable
     /// Initializes a new instance of <see cref="MountStateService"/>.
     /// </summary>
     /// <param name="logger">Logger for diagnostic information.</param>
-    /// <param name="stateFilePath">Optional explicit path to the state file; if null, uses %LocalAppData%\LiMount\mount-state.json</param>
+    /// <param name="driveLetterService">Service for managing drive letters.</param>
+    /// <param name="configuration">Configuration options for LiMount.</param>
+    /// <param name="stateFilePath">Optional explicit path to the state file. If null, uses configuration.Value.History.StateFilePath if present, otherwise uses the default path %LocalAppData%\LiMount\mount-state.json.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="logger"/>, <paramref name="driveLetterService"/>, or <paramref name="configuration"/> is null.</exception>
+    /// <remarks>
+    /// The state file directory is created if it is missing.
+    /// </remarks>
     public MountStateService(
         ILogger<MountStateService> logger,
         IDriveLetterService driveLetterService,

@@ -243,6 +243,8 @@ public class ScriptExecutor : IScriptExecutor
     /// <summary>
     /// Runs the specified executable with elevation and returns the script output written to a temporary file.
     /// </summary>
+    /// <param name="fileName">The executable to run (e.g., "powershell.exe").</param>
+    /// <param name="arguments">The arguments to pass to the executable.</param>
     /// <param name="diskIndex">Disk index used to construct the temporary output filename.</param>
     /// <param name="partition">Partition number used to construct the temporary output filename.</param>
     /// <param name="isUnmountOperation">Whether this is an unmount operation (uses different filename pattern).</param>

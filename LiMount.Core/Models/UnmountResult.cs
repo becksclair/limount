@@ -22,10 +22,8 @@ public class UnmountResult
     public string? ErrorMessage { get; set; }
 
     /// <summary>
-    /// Creates an UnmountResult from a dictionary of key-value pairs.
-    /// Expected keys: STATUS, DiskIndex, ErrorMessage
-    /// <summary>
     /// Creates an UnmountResult from a dictionary of key/value pairs produced by the Unmount-LinuxDisk.ps1 script.
+    /// Expected keys: STATUS, DiskIndex, ErrorMessage.
     /// </summary>
     /// <param name="values">Dictionary containing output keys such as "STATUS", "DiskIndex", and "ErrorMessage".</param>
     /// <returns>An UnmountResult whose Success is true when "STATUS" equals "OK", DiskIndex parsed from "DiskIndex" (defaults to 0), and ErrorMessage set from "ErrorMessage" if present.</returns>
