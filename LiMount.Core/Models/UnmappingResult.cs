@@ -32,10 +32,8 @@ public class UnmappingResult
     public string? RawError { get; set; }
 
     /// <summary>
-    /// Creates an UnmappingResult from a dictionary of key-value pairs.
-    /// Expected keys: STATUS, DriveLetter, ErrorMessage
-    /// <summary>
-    /// Create an UnmappingResult from key/value pairs returned by the Unmap-DriveLetter script.
+    /// Creates an UnmappingResult from key/value pairs returned by the Unmap-DriveLetter script.
+    /// Expected keys: STATUS (determines success), DriveLetter, and ErrorMessage.
     /// </summary>
     /// <param name="values">Dictionary containing script output keys. Expected keys: "STATUS" (determines success), "DriveLetter", and "ErrorMessage".</param>
     /// <returns>An UnmappingResult where <see cref="UnmappingResult.Success"/> is true when "STATUS" equals "OK" (case-insensitive); <see cref="UnmappingResult.DriveLetter"/> and <see cref="UnmappingResult.ErrorMessage"/> are set from their corresponding keys or null if absent.</returns>

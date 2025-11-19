@@ -1,7 +1,10 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
+using LiMount.Core.Configuration;
 
 namespace LiMount.Core.Services;
 
@@ -13,14 +16,24 @@ namespace LiMount.Core.Services;
 public class ScriptExecutor : IScriptExecutor
 {
     private readonly string _scriptsPath;
+    private readonly ILogger<ScriptExecutor>? _logger;
+    private readonly ScriptExecutionConfig _config;
 
     /// <summary>
     /// Initializes a new instance of <see cref="ScriptExecutor"/> and sets the scripts directory path.
     /// </summary>
+    /// <param name="config">Configuration for script execution.</param>
     /// <param name="scriptsPath">Optional explicit path to the directory containing PowerShell scripts; if null, the implementation locates a suitable scripts directory automatically.</param>
-    public ScriptExecutor(string? scriptsPath = null)
+    /// <param name="logger">Optional logger for diagnostic information.</param>
+    public ScriptExecutor(
+        IOptions<LiMountConfiguration> config,
+        string? scriptsPath = null,
+        ILogger<ScriptExecutor>? logger = null)
     {
+        ArgumentNullException.ThrowIfNull(config);
+        _config = config.Value.ScriptExecution;
         _scriptsPath = scriptsPath ?? FindScriptsPath();
+        _logger = logger;
     }
 
     /// <summary>
@@ -37,6 +50,24 @@ public class ScriptExecutor : IScriptExecutor
         string fsType,
         string? distroName = null)
     {
+        if (diskIndex < 0)
+        {
+            return new MountResult
+            {
+                Success = false,
+                ErrorMessage = "Disk index must be non-negative"
+            };
+        }
+
+        if (partition < 1)
+        {
+            return new MountResult
+            {
+                Success = false,
+                ErrorMessage = "Partition number must be greater than 0"
+            };
+        }
+
         if (string.IsNullOrWhiteSpace(fsType))
         {
             return new MountResult
@@ -78,6 +109,24 @@ public class ScriptExecutor : IScriptExecutor
     /// <returns>A MappingResult containing whether the mapping succeeded, any error message, and the script's raw output and error.</returns>
     public async Task<MappingResult> ExecuteMappingScriptAsync(char driveLetter, string targetUNC)
     {
+        if (!char.IsLetter(driveLetter))
+        {
+            return new MappingResult
+            {
+                Success = false,
+                ErrorMessage = "Drive letter must be a valid letter (A-Z)"
+            };
+        }
+
+        if (string.IsNullOrWhiteSpace(targetUNC))
+        {
+            return new MappingResult
+            {
+                Success = false,
+                ErrorMessage = "Target UNC path cannot be empty"
+            };
+        }
+
         var scriptPath = Path.Combine(_scriptsPath, "Map-WSLShareToDrive.ps1");
         if (!File.Exists(scriptPath))
         {
@@ -117,6 +166,15 @@ public class ScriptExecutor : IScriptExecutor
     /// <returns>An <see cref="UnmountResult"/> containing whether the operation succeeded and any error information.</returns>
     public async Task<UnmountResult> ExecuteUnmountScriptAsync(int diskIndex)
     {
+        if (diskIndex < 0)
+        {
+            return new UnmountResult
+            {
+                Success = false,
+                ErrorMessage = "Disk index must be non-negative"
+            };
+        }
+
         var scriptPath = Path.Combine(_scriptsPath, "Unmount-LinuxDisk.ps1");
         if (!File.Exists(scriptPath))
         {
@@ -142,6 +200,15 @@ public class ScriptExecutor : IScriptExecutor
     /// </returns>
     public async Task<UnmappingResult> ExecuteUnmappingScriptAsync(char driveLetter)
     {
+        if (!char.IsLetter(driveLetter))
+        {
+            return new UnmappingResult
+            {
+                Success = false,
+                ErrorMessage = "Drive letter must be a valid letter (A-Z)"
+            };
+        }
+
         var scriptPath = Path.Combine(_scriptsPath, "Unmap-DriveLetter.ps1");
         if (!File.Exists(scriptPath))
         {
@@ -176,6 +243,8 @@ public class ScriptExecutor : IScriptExecutor
     /// <summary>
     /// Runs the specified executable with elevation and returns the script output written to a temporary file.
     /// </summary>
+    /// <param name="fileName">The executable to run (e.g., "powershell.exe").</param>
+    /// <param name="arguments">The arguments to pass to the executable.</param>
     /// <param name="diskIndex">Disk index used to construct the temporary output filename.</param>
     /// <param name="partition">Partition number used to construct the temporary output filename.</param>
     /// <param name="isUnmountOperation">Whether this is an unmount operation (uses different filename pattern).</param>
@@ -212,9 +281,12 @@ public class ScriptExecutor : IScriptExecutor
                 ? Path.Combine(Path.GetTempPath(), $"limount_unmount_{diskIndex}.txt")
                 : Path.Combine(Path.GetTempPath(), $"limount_mount_{diskIndex}_{partition}.txt");
 
-            // Wait for file to be written
-            var timeout = TimeSpan.FromSeconds(5); // Increased to more realistic value
-            var pollingInterval = TimeSpan.FromMilliseconds(100);
+            // Wait for file to be written - normalize config values to prevent issues
+            var normalizedTimeoutSeconds = Math.Max(0, Math.Min(_config.TempFilePollingTimeoutSeconds, 300));
+            var normalizedPollingIntervalMs = Math.Max(1, Math.Min(_config.PollingIntervalMs, 10000));
+            
+            var timeout = TimeSpan.FromSeconds(normalizedTimeoutSeconds);
+            var pollingInterval = TimeSpan.FromMilliseconds(normalizedPollingIntervalMs);
             var totalWaitTime = TimeSpan.Zero;
 
             while (totalWaitTime < timeout)
@@ -229,7 +301,14 @@ public class ScriptExecutor : IScriptExecutor
             if (File.Exists(tempOutputFile))
             {
                 var output = await File.ReadAllTextAsync(tempOutputFile);
-                try { File.Delete(tempOutputFile); } catch { /* Ignore */ }
+                try
+                {
+                    File.Delete(tempOutputFile);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to delete temp file {TempFile}", tempOutputFile);
+                }
                 return output;
             }
 

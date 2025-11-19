@@ -1,5 +1,6 @@
 using System.Management;
 using System.Runtime.Versioning;
+using Microsoft.Extensions.Logging;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
 
@@ -18,6 +19,17 @@ namespace LiMount.Core.Services;
 [SupportedOSPlatform("windows")]
 public class DiskEnumerationService : IDiskEnumerationService
 {
+    private readonly ILogger<DiskEnumerationService> _logger;
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="DiskEnumerationService"/>.
+    /// </summary>
+    /// <param name="logger">Logger for diagnostic information.</param>
+    public DiskEnumerationService(ILogger<DiskEnumerationService> logger)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
     /// <summary>
     /// Enumerates physical disk drives on the system and returns DiskInfo objects populated with their partition details.
     /// </summary>
@@ -39,8 +51,7 @@ public class DiskEnumerationService : IDiskEnumerationService
         }
         catch (Exception ex)
         {
-            // Log or handle error - for MVP, we'll just return empty list
-            System.Diagnostics.Debug.WriteLine($"Error enumerating disks: {ex.Message}");
+            _logger.LogError(ex, "Error enumerating disks via WMI. Returning empty disk list.");
         }
 
         return disks;
@@ -120,7 +131,7 @@ public class DiskEnumerationService : IDiskEnumerationService
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Error getting partitions for disk {diskIndex}: {ex.Message}");
+            _logger.LogWarning(ex, "Error getting partitions for disk {DiskIndex}", diskIndex);
         }
 
         return partitions;
@@ -178,7 +189,7 @@ public class DiskEnumerationService : IDiskEnumerationService
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Error getting logical disk for partition: {ex.Message}");
+                _logger.LogWarning(ex, "Error getting logical disk for partition");
         }
 
         // Determine if likely Linux partition
@@ -282,7 +293,7 @@ public class DiskEnumerationService : IDiskEnumerationService
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Failed to get Windows folder while determining system/boot disk: {ex.ToString()}");
+                    _logger.LogWarning(ex, "Failed to get Windows folder while determining system/boot disk");
                 }
             }
         }

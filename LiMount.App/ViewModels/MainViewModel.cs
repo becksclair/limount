@@ -4,8 +4,12 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Windows;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using LiMount.App.Services;
+using LiMount.App.Views;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
 using LiMount.Core.Services;
@@ -22,6 +26,12 @@ public partial class MainViewModel : ObservableObject
     private readonly IDiskEnumerationService _diskService;
     private readonly IDriveLetterService _driveLetterService;
     private readonly IMountOrchestrator _mountOrchestrator;
+    private readonly IUnmountOrchestrator _unmountOrchestrator;
+    private readonly IMountStateService _mountStateService;
+    private readonly IEnvironmentValidationService _environmentValidationService;
+    private readonly IDialogService _dialogService;
+    private readonly Func<Views.HistoryWindow> _historyWindowFactory;
+    private readonly ILogger<MainViewModel> _logger;
 
     [ObservableProperty]
     private ObservableCollection<DiskInfo> _disks = new();
@@ -56,19 +66,68 @@ public partial class MainViewModel : ObservableObject
     private string? _lastMappedDriveLetter;
 
     /// <summary>
+    /// The disk index of the currently mounted disk, or null if nothing is mounted.
+    /// </summary>
+    [ObservableProperty]
+    private int? _currentMountedDiskIndex;
+
+    /// <summary>
+    /// The partition number of the currently mounted partition, or null if nothing is mounted.
+    /// </summary>
+    [ObservableProperty]
+    private int? _currentMountedPartition;
+
+    /// <summary>
+    /// The drive letter of the currently mounted partition, or null if nothing is mounted.
+    /// </summary>
+    [ObservableProperty]
+    private char? _currentMountedDriveLetter;
+
+    /// <summary>
+    /// Gets whether a disk is currently mounted.
+    /// </summary>
+    public bool IsMounted => CurrentMountedDiskIndex.HasValue;
+
+    /// <summary>
+    /// Called when CurrentMountedDiskIndex changes to notify IsMounted property.
+    /// </summary>
+    partial void OnCurrentMountedDiskIndexChanged(int? value)
+    {
+        OnPropertyChanged(nameof(IsMounted));
+    }
+
+    /// <summary>
     /// Initializes a new instance of MainViewModel and configures it with the provided services; subscribes to property changes so partitions are updated when SelectedDisk changes.
     /// </summary>
     /// <param name="diskService">Service used to enumerate candidate disks and their partitions.</param>
     /// <param name="driveLetterService">Service used to obtain available drive letters.</param>
     /// <param name="mountOrchestrator">Service used to orchestrate mounting and mapping operations.</param>
+    /// <param name="unmountOrchestrator">Service used to orchestrate unmounting and unmapping operations.</param>
+    /// <param name="mountStateService">Service used to track active mount state persistently.</param>
+    /// <param name="environmentValidationService">Service used to validate the environment meets requirements.</param>
+    /// <param name="dialogService">Service used to display dialogs to the user.</param>
+    /// <param name="historyWindowFactory">Factory for creating history window instances.</param>
+    /// <param name="logger">Logger for diagnostic information.</param>
     public MainViewModel(
         IDiskEnumerationService diskService,
         IDriveLetterService driveLetterService,
-        IMountOrchestrator mountOrchestrator)
+        IMountOrchestrator mountOrchestrator,
+        IUnmountOrchestrator unmountOrchestrator,
+        IMountStateService mountStateService,
+        IEnvironmentValidationService environmentValidationService,
+        IDialogService dialogService,
+        Func<Views.HistoryWindow> historyWindowFactory,
+        ILogger<MainViewModel> logger)
     {
         _diskService = diskService;
         _driveLetterService = driveLetterService;
         _mountOrchestrator = mountOrchestrator;
+        _unmountOrchestrator = unmountOrchestrator;
+        _mountStateService = mountStateService;
+        _environmentValidationService = environmentValidationService;
+        _dialogService = dialogService;
+        _historyWindowFactory = historyWindowFactory;
+        _logger = logger;
 
         PropertyChanged += OnPropertyChanged;
     }
@@ -97,16 +156,41 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Initializes the ViewModel by loading disks and drive letters asynchronously.
+    /// Initializes the ViewModel by validating the environment and loading disks and drive letters asynchronously.
     /// Call this after instantiation to perform heavy I/O operations.
     /// </summary>
     /// <param name="cancellationToken">Token to cancel initialization if the window closes.</param>
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        StatusMessage = "Loading disks and drive letters...";
+        StatusMessage = "Validating environment...";
+        _logger.LogInformation("Starting application initialization with environment validation");
+
+        // Validate environment first
+        var validationResult = await _environmentValidationService.ValidateEnvironmentAsync();
+
+        if (!validationResult.IsValid)
+        {
+            _logger.LogWarning("Environment validation failed. Errors: {Errors}", string.Join("; ", validationResult.Errors));
+
+            // Build detailed error message with suggestions
+            var errorMessage = "LiMount cannot start because your system does not meet the requirements:\n\n";
+            errorMessage += string.Join("\n", validationResult.Errors.Select(e => $"• {e}"));
+            errorMessage += "\n\nTo fix these issues:\n\n";
+            errorMessage += string.Join("\n", validationResult.Suggestions.Select(s => $"  {s}"));
+
+            await _dialogService.ShowErrorAsync(errorMessage, "Environment Validation Failed");
+
+            StatusMessage = "Environment validation failed. Please check the requirements.";
+            return;
+        }
+
+        _logger.LogInformation("Environment validation successful. WSL distros: {Distros}",
+            string.Join(", ", validationResult.InstalledDistros));
+
+        StatusMessage = $"Environment OK. Found {validationResult.InstalledDistros.Count} WSL distro(s). Loading disks...";
 
         // Run data retrieval on background thread
-        var data = await Task.Run(GetDisksAndDriveLettersData);
+        var data = await Task.Run(GetDisksAndDriveLettersData, cancellationToken);
 
         // Update UI on UI thread
         await Application.Current.Dispatcher.InvokeAsync(() => UpdateUIWithData(data));
@@ -132,6 +216,7 @@ public partial class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Failed to load disks and drive letters");
             StatusMessage = $"Error loading disks: {ex.Message}";
         }
     }
@@ -258,14 +343,44 @@ public partial class MainViewModel : ObservableObject
                 return;
             }
 
-            // Success!
+            // Success! Track the mount state
             _lastMappedDriveLetter = SelectedDriveLetter.ToString();
+            CurrentMountedDiskIndex = SelectedDisk.Index;
+            CurrentMountedPartition = SelectedPartition.PartitionNumber;
+            var driveLetter = result.DriveLetter ?? SelectedDriveLetter.Value;
+            CurrentMountedDriveLetter = driveLetter;
             CanOpenExplorer = true;
+
+            // Register mount state persistently
+            var activeMount = new ActiveMount
+            {
+                Id = Guid.NewGuid().ToString(),
+                MountedAt = DateTime.Now,
+                DiskIndex = result.DiskIndex,
+                PartitionNumber = result.Partition,
+                DriveLetter = driveLetter,
+                DistroName = result.DistroName ?? string.Empty,
+                MountPathLinux = result.MountPathLinux ?? string.Empty,
+                MountPathUNC = result.MountPathUNC ?? string.Empty,
+                IsVerified = true,
+                LastVerified = DateTime.Now
+            };
+            
+            try
+            {
+                await _mountStateService.RegisterMountAsync(activeMount);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to persist mount state for disk {DiskIndex} partition {Partition}", result.DiskIndex, result.Partition);
+                StatusMessage = $"Success! Mounted as {SelectedDriveLetter}: - Warning: Could not save mount state to history.";
+            }
 
             StatusMessage = $"Success! Mounted as {SelectedDriveLetter}: - You can now access the Linux partition from Windows Explorer.";
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Mount operation failed for disk {DiskIndex} partition {Partition}", SelectedDisk?.Index, SelectedPartition?.PartitionNumber);
             StatusMessage = $"Error: {ex.Message}";
         }
         finally
@@ -321,4 +436,103 @@ public partial class MainViewModel : ObservableObject
         return CanOpenExplorer && !string.IsNullOrEmpty(_lastMappedDriveLetter);
     }
 
+    /// <summary>
+    /// Unmounts the currently mounted disk from WSL2 and unmaps the Windows drive letter.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanUnmount))]
+    private async Task UnmountAsync()
+    {
+        if (!CurrentMountedDiskIndex.HasValue)
+        {
+            StatusMessage = "No disk is currently mounted.";
+            return;
+        }
+
+        // Ask for confirmation
+        var confirmed = await _dialogService.ConfirmAsync(
+            $"Are you sure you want to unmount disk {CurrentMountedDiskIndex} (Drive {CurrentMountedDriveLetter?.ToString() ?? "-"}:)?\n\n" +
+            "Make sure you have saved and closed any files on this drive before unmounting.",
+            "Confirm Unmount",
+            DialogType.Warning);
+
+        if (!confirmed)
+        {
+            StatusMessage = "Unmount cancelled.";
+            return;
+        }
+
+        IsBusy = true;
+
+        try
+        {
+            var progress = new Progress<string>(msg => StatusMessage = msg);
+
+            var unmountResult = await _unmountOrchestrator.UnmountAndUnmapAsync(
+                CurrentMountedDiskIndex.Value,
+                CurrentMountedDriveLetter,
+                progress);
+
+            if (!unmountResult.Success)
+            {
+                StatusMessage = unmountResult.ErrorMessage ?? "Unmount operation failed.";
+                return;
+            }
+
+            // Success! Clear mount state
+            var diskIndex = CurrentMountedDiskIndex.Value;
+            
+            try
+            {
+                await _mountStateService.UnregisterMountAsync(diskIndex);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to unregister mount state for disk {DiskIndex}, but proceeding with UI cleanup", diskIndex);
+            }
+
+            StatusMessage = $"Successfully unmounted disk {diskIndex}.";
+            CurrentMountedDiskIndex = null;
+            CurrentMountedPartition = null;
+            CurrentMountedDriveLetter = null;
+            _lastMappedDriveLetter = null;
+            CanOpenExplorer = false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unmount operation failed for disk {DiskIndex}", CurrentMountedDiskIndex);
+            StatusMessage = $"Error during unmount: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
+
+    /// <summary>
+    /// Determines whether the unmount command can be executed.
+    /// </summary>
+    /// <returns>`true` if not busy and a disk is currently mounted, `false` otherwise.</returns>
+    private bool CanUnmount()
+    {
+        return !IsBusy && IsMounted;
+    }
+
+    /// <summary>
+    /// Opens the mount history window to display past operations.
+    /// </summary>
+    [RelayCommand]
+    private void OpenHistory()
+    {
+        try
+        {
+            var historyWindow = _historyWindowFactory();
+            historyWindow.Owner = Application.Current.MainWindow;
+            historyWindow.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to open history window");
+            _ = _dialogService.ShowErrorAsync($"Failed to open history window:\n\n{ex.Message}", "Error");
+        }
+    }
+}

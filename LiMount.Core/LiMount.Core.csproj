@@ -14,6 +14,10 @@
     <!-- System.Management for WMI access to Win32_DiskDrive, Win32_Volume, etc. -->
     <!-- Version 10.0.0 is the latest stable for .NET 8 -->
     <PackageReference Include="System.Management" Version="10.0.0" />
+
+    <!-- Microsoft.Extensions for configuration and logging support -->
+    <PackageReference Include="Microsoft.Extensions.Options" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
   </ItemGroup>
 
 </Project>
