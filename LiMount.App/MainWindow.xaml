@@ -5,8 +5,8 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="LiMount - WSL Disk Mounter"
-        Height="600" Width="700"
-        MinHeight="500" MinWidth="650"
+        Height="720" Width="700"
+        MinHeight="650" MinWidth="650"
         Background="{StaticResource BackgroundBrush}"
         WindowStartupLocation="CenterScreen">
 
@@ -91,18 +91,23 @@
                         </ComboBox.ItemTemplate>
                     </ComboBox>
 
-                    <!-- Filesystem Type Selection -->
-                    <TextBlock Text="Filesystem Type"
+                    <!-- Detected Filesystem Type -->
+                    <TextBlock Text="Detected Filesystem"
                                FontSize="14"
                                FontWeight="SemiBold"
                                Foreground="{StaticResource TextPrimaryBrush}"
                                Margin="0,0,0,8"/>
-                    <ComboBox x:Name="FsTypeComboBox"
-                              Style="{StaticResource ModernComboBox}"
-                              ItemsSource="{Binding FileSystemTypes}"
-                              SelectedItem="{Binding SelectedFsType, Mode=TwoWay}"
-                              Margin="0,0,0,20"
-                              IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBooleanConverter}}"/>
+                    <Border Background="{StaticResource SurfaceBrush}"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="4"
+                            Padding="12,8"
+                            Margin="0,0,0,20">
+                        <TextBlock Text="{Binding DetectedFileSystem}"
+                                   FontSize="18"
+                                   FontWeight="Bold"
+                                   Foreground="{StaticResource PrimaryBrush}"/>
+                    </Border>
                 </StackPanel>
             </ScrollViewer>
         </Border>

@@ -395,4 +395,217 @@ public class ScriptExecutor : IScriptExecutor
         // Fallback
         return Path.Combine(appDirectory, "scripts");
     }
+
+    /// <inheritdoc/>
+    public async Task<string?> DetectFilesystemTypeAsync(int diskIndex, int partitionNumber)
+    {
+        var diskPath = $@"\\.\PHYSICALDRIVE{diskIndex}";
+        _logger.LogInformation("Detecting filesystem type for disk {DiskIndex} partition {Partition}", diskIndex, partitionNumber);
+
+        try
+        {
+            // First, check if disk is already mounted by looking for its mount path
+            var alreadyMounted = await IsDiskAlreadyMountedAsync(diskIndex, partitionNumber);
+            
+            if (alreadyMounted)
+            {
+                // Disk is already mounted - just run lsblk directly
+                _logger.LogInformation("Disk {DiskIndex} is already mounted, reading filesystem type directly", diskIndex);
+                var lsblkResult = await RunWslCommandAsync("lsblk -f -o NAME,FSTYPE -P");
+                if (lsblkResult.Success && !string.IsNullOrEmpty(lsblkResult.Output))
+                {
+                    var fsType = ParseLsblkOutput(lsblkResult.Output, partitionNumber);
+                    _logger.LogInformation("Detected filesystem type: {FsType}", fsType ?? "unknown");
+                    return fsType;
+                }
+                return null;
+            }
+            
+            // Step 1: Attach disk with --bare (requires elevation)
+            var attachResult = await RunElevatedWslCommandAsync($"--mount {diskPath} --bare");
+            if (!attachResult.Success)
+            {
+                // Check if already mounted error
+                if (attachResult.Error?.Contains("already mounted", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    _logger.LogInformation("Disk already mounted, trying lsblk directly");
+                    var lsblkResult = await RunWslCommandAsync("lsblk -f -o NAME,FSTYPE -P");
+                    if (lsblkResult.Success && !string.IsNullOrEmpty(lsblkResult.Output))
+                    {
+                        return ParseLsblkOutput(lsblkResult.Output, partitionNumber);
+                    }
+                }
+                _logger.LogWarning("Failed to attach disk for filesystem detection: {Error}", attachResult.Error);
+                return null;
+            }
+
+            try
+            {
+                // Step 2: Run lsblk to detect filesystem (no elevation needed)
+                var lsblkResult = await RunWslCommandAsync("lsblk -f -o NAME,FSTYPE -P");
+                if (!lsblkResult.Success || string.IsNullOrEmpty(lsblkResult.Output))
+                {
+                    _logger.LogWarning("Failed to run lsblk: {Error}", lsblkResult.Error);
+                    return null;
+                }
+
+                // Step 3: Parse output to find filesystem type
+                // Looking for the partition that corresponds to the disk we attached
+                // Format: NAME="sde1" FSTYPE="xfs"
+                var fsType = ParseLsblkOutput(lsblkResult.Output, partitionNumber);
+                _logger.LogInformation("Detected filesystem type: {FsType}", fsType ?? "unknown");
+                return fsType;
+            }
+            finally
+            {
+                // Step 4: Always detach the disk
+                await RunElevatedWslCommandAsync($"--unmount {diskPath}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error detecting filesystem type for disk {DiskIndex}", diskIndex);
+            return null;
+        }
+    }
+    
+    /// <summary>
+    /// Checks if a disk is already mounted in WSL.
+    /// </summary>
+    private async Task<bool> IsDiskAlreadyMountedAsync(int diskIndex, int partitionNumber)
+    {
+        try
+        {
+            // Check if the mount path exists via UNC
+            var mountName = $"PHYSICALDRIVE{diskIndex}p{partitionNumber}";
+            
+            // Try to find a WSL distro and check if mount exists
+            var distroResult = await RunWslCommandAsync("-l -q");
+            if (!distroResult.Success || string.IsNullOrEmpty(distroResult.Output))
+                return false;
+            
+            var distros = distroResult.Output
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(d => d.Trim().Replace("\0", ""))
+                .Where(d => !string.IsNullOrWhiteSpace(d))
+                .ToList();
+            
+            if (distros.Count == 0) return false;
+            
+            var distroName = distros[0];
+            var uncPath = $@"\\wsl.localhost\{distroName}\mnt\wsl\{mountName}";
+            
+            return Directory.Exists(uncPath);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Runs an elevated WSL command (requires UAC).
+    /// </summary>
+    private async Task<(bool Success, string? Output, string? Error)> RunElevatedWslCommandAsync(string arguments)
+    {
+        var tempFile = Path.Combine(Path.GetTempPath(), $"wsl_output_{Guid.NewGuid()}.txt");
+
+        try
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = "wsl.exe",
+                Arguments = arguments,
+                UseShellExecute = true,
+                Verb = "runas",
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
+
+            using var process = Process.Start(startInfo);
+            if (process == null)
+            {
+                return (false, null, "Failed to start WSL process");
+            }
+
+            await process.WaitForExitAsync();
+            return (process.ExitCode == 0, null, process.ExitCode != 0 ? $"Exit code: {process.ExitCode}" : null);
+        }
+        catch (Exception ex)
+        {
+            return (false, null, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Runs a non-elevated WSL command and captures output.
+    /// </summary>
+    private async Task<(bool Success, string? Output, string? Error)> RunWslCommandAsync(string linuxCommand)
+    {
+        try
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = "wsl.exe",
+                Arguments = $"-e {linuxCommand}",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            using var process = Process.Start(startInfo);
+            if (process == null)
+            {
+                return (false, null, "Failed to start WSL process");
+            }
+
+            var output = await process.StandardOutput.ReadToEndAsync();
+            var error = await process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+
+            return (process.ExitCode == 0, output, error);
+        }
+        catch (Exception ex)
+        {
+            return (false, null, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Parses lsblk output to find the filesystem type for a partition.
+    /// </summary>
+    private string? ParseLsblkOutput(string output, int partitionNumber)
+    {
+        // The mounted disk will be the last sd* device
+        // We're looking for lines like: NAME="sde1" FSTYPE="xfs"
+        var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+        // Find the newest device (highest sd letter) with a partition number
+        string? lastFsType = null;
+        foreach (var line in lines)
+        {
+            // Look for partition entries (e.g., sd*1, sd*2)
+            if (line.Contains($"NAME=\"") && line.Contains("FSTYPE=\""))
+            {
+                // Extract NAME and FSTYPE
+                var nameMatch = System.Text.RegularExpressions.Regex.Match(line, @"NAME=""([^""]+)""");
+                var fsTypeMatch = System.Text.RegularExpressions.Regex.Match(line, @"FSTYPE=""([^""]*)""");
+
+                if (nameMatch.Success && fsTypeMatch.Success)
+                {
+                    var name = nameMatch.Groups[1].Value;
+                    var fsType = fsTypeMatch.Groups[1].Value;
+
+                    // Check if this is a partition (ends with a number matching our partition)
+                    if (name.EndsWith(partitionNumber.ToString()) && !string.IsNullOrEmpty(fsType))
+                    {
+                        lastFsType = fsType;
+                    }
+                }
+            }
+        }
+
+        return lastFsType;
+    }
 }

@@ -116,9 +116,9 @@ public class DiskEnumerationService : IDiskEnumerationService
 
         try
         {
-            // Query partitions for this disk
-            // Use Win32_DiskDriveToDiskPartition association
-            var partitionQuery = $"ASSOCIATORS OF {{Win32_DiskDrive.DeviceID='{diskDeviceId.Replace("\\", "\\\\")}'}} WHERE AssocClass=Win32_DiskDriveToDiskPartition";
+            // Query partitions for this disk directly using DiskIndex
+            // This is more reliable than ASSOCIATORS query which has escaping issues with DeviceID
+            var partitionQuery = $"SELECT * FROM Win32_DiskPartition WHERE DiskIndex = {diskIndex}";
 
             using var partitionSearcher = new ManagementObjectSearcher(partitionQuery);
             var partitionCollection = partitionSearcher.Get();

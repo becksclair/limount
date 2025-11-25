@@ -38,8 +38,8 @@ param(
     [int]$Partition,
 
     [Parameter(Mandatory=$false)]
-    [ValidateSet("ext4", "xfs", "btrfs", "vfat")]
-    [string]$FsType = "ext4",
+    [ValidateSet("ext4", "xfs", "btrfs", "vfat", "auto")]
+    [string]$FsType = "auto",
 
     [Parameter(Mandatory=$false)]
     [string]$DistroName
@@ -113,7 +113,12 @@ $diskPath = "\\.\PHYSICALDRIVE$DiskIndex"
 Write-Verbose "Mounting $diskPath partition $Partition as $FsType..."
 
 try {
-    $mountArgs = @("--mount", $diskPath, "--partition", $Partition, "--type", $FsType)
+    # Build mount arguments - omit --type for "auto" to let WSL detect
+    if ($FsType -eq "auto") {
+        $mountArgs = @("--mount", $diskPath, "--partition", $Partition)
+    } else {
+        $mountArgs = @("--mount", $diskPath, "--partition", $Partition, "--type", $FsType)
+    }
 
     $mountOutput = & wsl.exe @mountArgs 2>&1
     $mountExitCode = $LASTEXITCODE
@@ -140,16 +145,16 @@ Write-Verbose "Determining WSL distro..."
 if (-not $DistroName) {
     # Try to enumerate distros via \\wsl$ share first
     try {
-        $wslPath = "\\wsl$"
+        $wslPath = '\\wsl$'
         if (Test-Path $wslPath) {
             $distros = Get-ChildItem -Path $wslPath -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name
             if ($distros) {
                 $DistroName = $distros | Select-Object -First 1
-                Write-Verbose "Found distro via \\wsl$: $DistroName"
+                Write-Verbose "Found distro via wsl`$: $DistroName"
             }
         }
     } catch {
-        Write-Verbose "Could not enumerate \\wsl$: $($_.Exception.Message)"
+        Write-Verbose "Could not enumerate wsl`$: $($_.Exception.Message)"
     }
 
     # Fallback: use wsl -l -q
@@ -221,8 +226,8 @@ try {
     Write-Verbose "Error listing mounts, using expected path: $mountPathLinux"
 }
 
-# Build UNC path
-$mountPathUNC = "\\wsl$\$DistroName$($mountPathLinux -replace '/', '\')"
+# Build UNC path - use wsl.localhost instead of wsl$ for better Explorer compatibility
+$mountPathUNC = "\\wsl.localhost\$DistroName$($mountPathLinux -replace '/', '\')"
 
 Write-Verbose "UNC path: $mountPathUNC"
 

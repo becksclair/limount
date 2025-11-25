@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -31,10 +32,13 @@ public partial class MainViewModel : ObservableObject
     private readonly IUnmountOrchestrator _unmountOrchestrator;
     private readonly IMountStateService _mountStateService;
     private readonly IEnvironmentValidationService _environmentValidationService;
+    private readonly IScriptExecutor _scriptExecutor;
     private readonly IDialogService _dialogService;
     private readonly Func<Views.HistoryWindow> _historyWindowFactory;
     private readonly ILogger<MainViewModel> _logger;
     private readonly LiMountConfiguration _config;
+
+    private string? _detectedFsType;
 
     [ObservableProperty]
     private ObservableCollection<DiskInfo> _disks = new();
@@ -54,13 +58,40 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private char? _selectedDriveLetter;
 
-    [ObservableProperty]
-    private string _selectedFsType = "ext4";
+    /// <summary>
+    /// Detected filesystem type from the selected partition.
+    /// </summary>
+    public string DetectedFileSystem => GetDetectedFileSystem();
 
     /// <summary>
-    /// Available filesystem types for mounting Linux partitions.
+    /// Whether filesystem detection is in progress.
     /// </summary>
-    public IReadOnlyList<string> FileSystemTypes { get; } = new[] { "ext4", "xfs", "btrfs", "vfat" };
+    [ObservableProperty]
+    private bool _isDetectingFs;
+
+    /// <summary>
+    /// Gets the filesystem type to use for mounting.
+    /// </summary>
+    private string GetFileSystemTypeForMount()
+    {
+        if (!string.IsNullOrEmpty(_detectedFsType))
+            return _detectedFsType;
+        return "auto";
+    }
+
+    /// <summary>
+    /// Gets the display string for the detected filesystem.
+    /// </summary>
+    private string GetDetectedFileSystem()
+    {
+        if (SelectedPartition == null)
+            return "Select a partition";
+        if (IsDetectingFs)
+            return "Detecting...";
+        if (!string.IsNullOrEmpty(_detectedFsType))
+            return _detectedFsType.ToUpperInvariant();
+        return "Click Detect to identify";
+    }
 
     [ObservableProperty]
     private string _statusMessage = "Ready. Select a disk, partition, and drive letter, then click Mount.";
@@ -111,6 +142,7 @@ public partial class MainViewModel : ObservableObject
     /// <param name="unmountOrchestrator">Service used to orchestrate unmounting and unmapping operations.</param>
     /// <param name="mountStateService">Service used to track active mount state persistently.</param>
     /// <param name="environmentValidationService">Service used to validate the environment meets requirements.</param>
+    /// <param name="scriptExecutor">Service used to execute scripts and detect filesystems.</param>
     /// <param name="dialogService">Service used to display dialogs to the user.</param>
     /// <param name="historyWindowFactory">Factory for creating history window instances.</param>
     /// <param name="logger">Logger for diagnostic information.</param>
@@ -122,6 +154,7 @@ public partial class MainViewModel : ObservableObject
         IUnmountOrchestrator unmountOrchestrator,
         IMountStateService mountStateService,
         IEnvironmentValidationService environmentValidationService,
+        IScriptExecutor scriptExecutor,
         IDialogService dialogService,
         Func<Views.HistoryWindow> historyWindowFactory,
         ILogger<MainViewModel> logger,
@@ -133,6 +166,7 @@ public partial class MainViewModel : ObservableObject
         _unmountOrchestrator = unmountOrchestrator;
         _mountStateService = mountStateService;
         _environmentValidationService = environmentValidationService;
+        _scriptExecutor = scriptExecutor;
         _dialogService = dialogService;
         _historyWindowFactory = historyWindowFactory;
         _logger = logger;
@@ -151,6 +185,26 @@ public partial class MainViewModel : ObservableObject
         if (e.PropertyName == nameof(SelectedDisk))
         {
             UpdatePartitions();
+            _detectedFsType = null;
+            OnPropertyChanged(nameof(DetectedFileSystem));
+            MountCommand.NotifyCanExecuteChanged();
+        }
+        else if (e.PropertyName == nameof(SelectedPartition))
+        {
+            // Clear detection and auto-detect when partition changes
+            _detectedFsType = null;
+            OnPropertyChanged(nameof(DetectedFileSystem));
+            MountCommand.NotifyCanExecuteChanged();
+
+            // Auto-detect filesystem type
+            if (SelectedDisk != null && SelectedPartition != null)
+            {
+                _ = DetectFilesystemAsync();
+            }
+        }
+        else if (e.PropertyName == nameof(SelectedDriveLetter))
+        {
+            MountCommand.NotifyCanExecuteChanged();
         }
     }
 
@@ -163,6 +217,55 @@ public partial class MainViewModel : ObservableObject
     {
         await LoadDisksAndDriveLetters();
     }
+
+    /// <summary>
+    /// Detects the filesystem type of the selected partition using WSL.
+    /// Requires elevation to temporarily attach the disk.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanDetectFilesystem))]
+    private async Task DetectFilesystemAsync()
+    {
+        if (SelectedDisk == null || SelectedPartition == null)
+            return;
+
+        IsDetectingFs = true;
+        OnPropertyChanged(nameof(DetectedFileSystem));
+        StatusMessage = "Detecting filesystem type (UAC prompt required)...";
+
+        try
+        {
+            var fsType = await _scriptExecutor.DetectFilesystemTypeAsync(
+                SelectedDisk.Index,
+                SelectedPartition.PartitionNumber);
+
+            _detectedFsType = fsType;
+            OnPropertyChanged(nameof(DetectedFileSystem));
+
+            if (!string.IsNullOrEmpty(fsType))
+            {
+                StatusMessage = $"Detected filesystem: {fsType.ToUpperInvariant()}";
+            }
+            else
+            {
+                StatusMessage = "Could not detect filesystem type. Will use auto-detection during mount.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to detect filesystem type");
+            StatusMessage = $"Detection failed: {ex.Message}";
+        }
+        finally
+        {
+            IsDetectingFs = false;
+            OnPropertyChanged(nameof(DetectedFileSystem));
+        }
+    }
+
+    /// <summary>
+    /// Determines if filesystem detection can be executed.
+    /// </summary>
+    private bool CanDetectFilesystem() => SelectedDisk != null && SelectedPartition != null && !IsBusy && !IsDetectingFs;
 
     /// <summary>
     /// Initializes the ViewModel by validating the environment and loading disks and drive letters asynchronously.
@@ -221,6 +324,189 @@ public partial class MainViewModel : ObservableObject
 
         // Update UI on UI thread
         await Application.Current.Dispatcher.InvokeAsync(() => UpdateUIWithData(data));
+        
+        // Check for existing mounts
+        await DetectExistingMountsAsync();
+    }
+    
+    /// <summary>
+    /// Detects any existing WSL mounts and drive letter mappings from previous sessions.
+    /// Updates the mount state if a valid mount is found.
+    /// </summary>
+    private async Task DetectExistingMountsAsync()
+    {
+        try
+        {
+            StatusMessage = "Checking for existing mounts...";
+            
+            // First check our persisted mount state
+            var activeMounts = await _mountStateService.GetActiveMountsAsync();
+            if (activeMounts.Count > 0)
+            {
+                var mount = activeMounts.First();
+                
+                // Verify the mount is still valid by checking if the UNC path exists
+                var uncPathExists = !string.IsNullOrEmpty(mount.MountPathUNC) && 
+                                    Directory.Exists(mount.MountPathUNC);
+                
+                if (uncPathExists)
+                {
+                    CurrentMountedDiskIndex = mount.DiskIndex;
+                    CurrentMountedPartition = mount.PartitionNumber;
+                    CurrentMountedDriveLetter = mount.DriveLetter;
+                    CanOpenExplorer = true;
+                    
+                    StatusMessage = $"Found existing mount: Disk {mount.DiskIndex} partition {mount.PartitionNumber} → {mount.DriveLetter}:";
+                    _logger.LogInformation("Detected existing mount from state: Disk {DiskIndex} partition {Partition} at {DriveLetter}:",
+                        mount.DiskIndex, mount.PartitionNumber, mount.DriveLetter);
+                    
+                    UnmountCommand.NotifyCanExecuteChanged();
+                    OpenExplorerCommand.NotifyCanExecuteChanged();
+                    return;
+                }
+                else
+                {
+                    // Mount state exists but is stale - clean it up
+                    _logger.LogInformation("Stale mount state found for disk {DiskIndex}, cleaning up", mount.DiskIndex);
+                    await _mountStateService.UnregisterMountAsync(mount.DiskIndex);
+                }
+            }
+            
+            // If no persisted state, check for WSL mounts + subst mappings directly
+            var detectedMount = await DetectMountFromSystemAsync();
+            if (detectedMount != null)
+            {
+                CurrentMountedDiskIndex = detectedMount.Value.diskIndex;
+                CurrentMountedPartition = detectedMount.Value.partition;
+                
+                // Check if there's a drive letter assigned ('\0' means WSL mount without drive mapping)
+                if (detectedMount.Value.driveLetter != '\0')
+                {
+                    CurrentMountedDriveLetter = detectedMount.Value.driveLetter;
+                    CanOpenExplorer = true;
+                    StatusMessage = $"Detected existing mount: Disk {detectedMount.Value.diskIndex} → {detectedMount.Value.driveLetter}:";
+                }
+                else
+                {
+                    // WSL mount exists but no drive letter - need to unmount to remount properly
+                    CurrentMountedDriveLetter = null;
+                    CanOpenExplorer = false;
+                    StatusMessage = $"Detected WSL mount for Disk {detectedMount.Value.diskIndex} (no drive letter). Click Unmount to clean up.";
+                }
+                
+                _logger.LogInformation("Detected existing mount from system: Disk {DiskIndex} partition {Partition}, drive letter: {DriveLetter}",
+                    detectedMount.Value.diskIndex, detectedMount.Value.partition, 
+                    detectedMount.Value.driveLetter == '\0' ? "(none)" : detectedMount.Value.driveLetter.ToString());
+                
+                UnmountCommand.NotifyCanExecuteChanged();
+                OpenExplorerCommand.NotifyCanExecuteChanged();
+            }
+            else
+            {
+                StatusMessage = $"Found {Disks.Count} candidate disk(s). Ready to mount.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to detect existing mounts");
+            StatusMessage = $"Found {Disks.Count} candidate disk(s). Ready to mount.";
+        }
+    }
+    
+    /// <summary>
+    /// Checks the system for existing WSL mounts and subst mappings.
+    /// </summary>
+    private async Task<(int diskIndex, int partition, char driveLetter)?> DetectMountFromSystemAsync()
+    {
+        return await Task.Run<(int diskIndex, int partition, char driveLetter)?>(() =>
+        {
+            // First check subst mappings
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "subst",
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                
+                using var process = Process.Start(psi);
+                if (process != null)
+                {
+                    var output = process.StandardOutput.ReadToEnd();
+                    process.WaitForExit(5000);
+                    
+                    // Parse subst output: "Z:\: => UNC\wsl.localhost\Ubuntu-24.04\mnt\wsl\PHYSICALDRIVE1p1"
+                    foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        var match = Regex.Match(
+                            line, 
+                            @"^([A-Z]):\\: => .+PHYSICALDRIVE(\d+)p(\d+)",
+                            RegexOptions.IgnoreCase);
+                        
+                        if (match.Success)
+                        {
+                            var driveLetter = match.Groups[1].Value[0];
+                            var diskIndex = int.Parse(match.Groups[2].Value);
+                            var partition = int.Parse(match.Groups[3].Value);
+                            
+                            _logger.LogDebug("Found subst mapping: {DriveLetter}: -> Disk {DiskIndex} partition {Partition}",
+                                driveLetter, diskIndex, partition);
+                            
+                            return (diskIndex, partition, driveLetter);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to check subst mappings");
+            }
+            
+            // Also check for WSL-only mounts (no drive letter mapping)
+            try
+            {
+                // Check /mnt/wsl for mounted drives
+                var wslPsi = new ProcessStartInfo
+                {
+                    FileName = "wsl.exe",
+                    Arguments = "-e ls /mnt/wsl",
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                
+                using var wslProcess = Process.Start(wslPsi);
+                if (wslProcess != null)
+                {
+                    var wslOutput = wslProcess.StandardOutput.ReadToEnd();
+                    wslProcess.WaitForExit(5000);
+                    
+                    foreach (var entry in wslOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        var match = Regex.Match(entry.Trim(), @"PHYSICALDRIVE(\d+)p(\d+)", RegexOptions.IgnoreCase);
+                        if (match.Success)
+                        {
+                            var diskIndex = int.Parse(match.Groups[1].Value);
+                            var partition = int.Parse(match.Groups[2].Value);
+                            
+                            _logger.LogDebug("Found WSL mount without drive letter: Disk {DiskIndex} partition {Partition}",
+                                diskIndex, partition);
+                            
+                            // Return with null-char to indicate no drive letter assigned
+                            return (diskIndex, partition, '\0');
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to check WSL mounts");
+            }
+            
+            return null;
+        });
     }
 
     /// <summary>
@@ -360,7 +646,7 @@ public partial class MainViewModel : ObservableObject
                 SelectedDisk.Index,
                 SelectedPartition.PartitionNumber,
                 SelectedDriveLetter.Value,
-                SelectedFsType,
+                GetFileSystemTypeForMount(),
                 null,
                 progress);
 
@@ -376,6 +662,10 @@ public partial class MainViewModel : ObservableObject
             var driveLetter = result.DriveLetter ?? SelectedDriveLetter.Value;
             CurrentMountedDriveLetter = driveLetter;
             CanOpenExplorer = true;
+            
+            // Notify commands that mount state changed
+            UnmountCommand.NotifyCanExecuteChanged();
+            OpenExplorerCommand.NotifyCanExecuteChanged();
 
             // Register mount state persistently
             var activeMount = new ActiveMount

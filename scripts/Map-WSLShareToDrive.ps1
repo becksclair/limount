@@ -67,10 +67,23 @@ if ([string]::IsNullOrWhiteSpace($TargetUNC)) {
 
 $TargetUNC = $TargetUNC.Trim()
 
-# Test if UNC path is reachable
+# Test if UNC path is reachable (with retries for WSL startup delay)
 Write-Verbose "Testing UNC path: $TargetUNC"
-if (-not (Test-Path -Path $TargetUNC -ErrorAction SilentlyContinue)) {
-    Write-Result -Success $false -ErrorMessage "UNC path is not reachable: $TargetUNC"
+$maxRetries = 5
+$retryDelayMs = 1000
+$uncReachable = $false
+
+for ($i = 0; $i -lt $maxRetries; $i++) {
+    if (Test-Path -Path $TargetUNC -ErrorAction SilentlyContinue) {
+        $uncReachable = $true
+        break
+    }
+    Write-Verbose "UNC path not yet reachable, retry $($i + 1)/$maxRetries..."
+    Start-Sleep -Milliseconds $retryDelayMs
+}
+
+if (-not $uncReachable) {
+    Write-Result -Success $false -ErrorMessage "UNC path is not reachable after $maxRetries retries: $TargetUNC"
 }
 
 # Check if drive letter is already in use
@@ -120,50 +133,143 @@ try {
     # Ignore errors
 }
 
-# Try to map using 'net use' first
-Write-Verbose "Mapping $driveWithColon to $TargetUNC using net use..."
+# For WSL paths (\\wsl$ or \\wsl.localhost), use subst command which works better
+# net use and New-PSDrive often fail with "network resource type is not correct"
+$isWslPath = $TargetUNC -match '^\\\\wsl[\$\.]'
 
-try {
-    $netUseResult = net use $driveWithColon $TargetUNC 2>&1
-    $netUseExitCode = $LASTEXITCODE
-
-    if ($netUseExitCode -eq 0) {
-        # Verify the mapping worked
-        if (Test-Path "${driveWithColon}\") {
-            Write-Verbose "Successfully mapped with net use."
-            Write-Result -Success $true -DriveLetter $DriveLetter -MappedTo $TargetUNC
-        } else {
-            Write-Verbose "net use succeeded but path not accessible, trying New-PSDrive..."
+if ($isWslPath) {
+    Write-Verbose "Detected WSL path, using subst command..."
+    
+    # Check if running elevated - affects how we create the mapping
+    $isElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    
+    # Clean up any existing subst mappings pointing to the same target
+    # This prevents accumulating multiple drive letters for the same disk
+    try {
+        $existingSubst = subst 2>&1
+        if ($existingSubst) {
+            # Extract the mount point name (e.g., PHYSICALDRIVE1p1) from target path
+            $targetMountPoint = if ($TargetUNC -match 'PHYSICALDRIVE\d+p\d+') { $Matches[0] } else { $null }
+            
+            foreach ($line in $existingSubst) {
+                if ($line -match '^([A-Z]):\\: => (.+)$') {
+                    $existingLetter = $Matches[1]
+                    $existingPath = $Matches[2]
+                    
+                    # Remove if it points to the same disk mount point
+                    if ($targetMountPoint -and $existingPath -match $targetMountPoint) {
+                        Write-Verbose "Removing existing mapping $existingLetter`: pointing to same disk"
+                        subst "$($existingLetter):" /d 2>&1 | Out-Null
+                    }
+                }
+            }
         }
-    } else {
-        Write-Verbose "net use failed (exit code $netUseExitCode): $netUseResult"
+    } catch {
+        Write-Verbose "Could not check existing subst mappings: $($_.Exception.Message)"
+    }
+    
+    # Remove any existing subst mapping for the requested drive letter
+    try {
+        subst $driveWithColon /d 2>&1 | Out-Null
+    } catch {
+        # Ignore errors
+    }
+    
+    try {
+        if ($isElevated) {
+            # When elevated, use a scheduled task to run subst in user context
+            # This makes the drive visible in non-elevated Explorer
+            Write-Verbose "Running elevated, using scheduled task to create mapping in user context..."
+            
+            $taskName = "LiMount_Map_$DriveLetter"
+            $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+            
+            # Delete any existing task
+            schtasks /delete /tn $taskName /f 2>&1 | Out-Null
+            
+            # Create and run task to execute subst in user context
+            $action = "subst $driveWithColon `"$TargetUNC`""
+            schtasks /create /tn $taskName /tr "cmd /c $action" /sc once /st 00:00 /ru $currentUser /f 2>&1 | Out-Null
+            schtasks /run /tn $taskName 2>&1 | Out-Null
+            
+            # Wait for task to complete
+            Start-Sleep -Milliseconds 1500
+            
+            # Clean up the task
+            schtasks /delete /tn $taskName /f 2>&1 | Out-Null
+        } else {
+            subst $driveWithColon $TargetUNC 2>&1 | Out-Null
+        }
+        
+        # Verify the mapping worked
+        Start-Sleep -Milliseconds 500
+        
+        if ($isElevated) {
+            # When elevated, we can't see the user-context subst mapping
+            # Verify by checking the target UNC path is accessible
+            if (Test-Path $TargetUNC) {
+                Write-Verbose "Target UNC accessible, mapping created in user context."
+                Write-Result -Success $true -DriveLetter $DriveLetter -MappedTo $TargetUNC
+            } else {
+                Write-Result -Success $false -ErrorMessage "Target UNC path not accessible: $TargetUNC"
+            }
+        } else {
+            if (Test-Path "${driveWithColon}\") {
+                Write-Verbose "Successfully mapped with subst."
+                Write-Result -Success $true -DriveLetter $DriveLetter -MappedTo $TargetUNC
+            } else {
+                Write-Result -Success $false -ErrorMessage "subst mapping not accessible at ${driveWithColon}\"
+            }
+        }
+    } catch {
+        Write-Result -Success $false -ErrorMessage "Failed to map drive with subst: $($_.Exception.Message)"
+    }
+} else {
+    # For non-WSL paths, try net use first
+    Write-Verbose "Mapping $driveWithColon to $TargetUNC using net use..."
+
+    try {
+        $netUseResult = net use $driveWithColon $TargetUNC 2>&1
+        $netUseExitCode = $LASTEXITCODE
+
+        if ($netUseExitCode -eq 0) {
+            # Verify the mapping worked
+            if (Test-Path "${driveWithColon}\") {
+                Write-Verbose "Successfully mapped with net use."
+                Write-Result -Success $true -DriveLetter $DriveLetter -MappedTo $TargetUNC
+            } else {
+                Write-Verbose "net use succeeded but path not accessible, trying New-PSDrive..."
+            }
+        } else {
+            Write-Verbose "net use failed (exit code $netUseExitCode): $netUseResult"
+            Write-Verbose "Trying New-PSDrive as fallback..."
+        }
+    } catch {
+        Write-Verbose "net use threw exception: $($_.Exception.Message)"
         Write-Verbose "Trying New-PSDrive as fallback..."
     }
-} catch {
-    Write-Verbose "net use threw exception: $($_.Exception.Message)"
-    Write-Verbose "Trying New-PSDrive as fallback..."
-}
 
-# Fallback: try New-PSDrive
-Write-Verbose "Mapping $driveWithColon to $TargetUNC using New-PSDrive..."
+    # Fallback: try New-PSDrive
+    Write-Verbose "Mapping $driveWithColon to $TargetUNC using New-PSDrive..."
 
-try {
-    # Remove any existing PSDrive first
-    Remove-PSDrive -Name $DriveLetter -Force -ErrorAction SilentlyContinue | Out-Null
+    try {
+        # Remove any existing PSDrive first
+        Remove-PSDrive -Name $DriveLetter -Force -ErrorAction SilentlyContinue | Out-Null
 
-    $newDrive = New-PSDrive -Name $DriveLetter -PSProvider FileSystem -Root $TargetUNC -Persist -Scope Global -ErrorAction Stop
+        $newDrive = New-PSDrive -Name $DriveLetter -PSProvider FileSystem -Root $TargetUNC -Persist -Scope Global -ErrorAction Stop
 
-    if ($newDrive) {
-        # Verify the mapping worked
-        if (Test-Path "${driveWithColon}\") {
-            Write-Verbose "Successfully mapped with New-PSDrive."
-            Write-Result -Success $true -DriveLetter $DriveLetter -MappedTo $TargetUNC
+        if ($newDrive) {
+            # Verify the mapping worked
+            if (Test-Path "${driveWithColon}\") {
+                Write-Verbose "Successfully mapped with New-PSDrive."
+                Write-Result -Success $true -DriveLetter $DriveLetter -MappedTo $TargetUNC
+            } else {
+                Write-Result -Success $false -ErrorMessage "New-PSDrive succeeded but path ${driveWithColon}\ is not accessible."
+            }
         } else {
-            Write-Result -Success $false -ErrorMessage "New-PSDrive succeeded but path ${driveWithColon}\ is not accessible."
+            Write-Result -Success $false -ErrorMessage "New-PSDrive returned null."
         }
-    } else {
-        Write-Result -Success $false -ErrorMessage "New-PSDrive returned null."
+    } catch {
+        Write-Result -Success $false -ErrorMessage "Failed to map drive with New-PSDrive: $($_.Exception.Message)"
     }
-} catch {
-    Write-Result -Success $false -ErrorMessage "Failed to map drive with New-PSDrive: $($_.Exception.Message)"
 }

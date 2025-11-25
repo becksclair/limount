@@ -63,7 +63,8 @@ public partial class App : Application
         // Configure Serilog with error handling
         var serilogConfig = new LoggerConfiguration()
             .MinimumLevel.Information()
-            .Enrich.FromLogContext();
+            .Enrich.FromLogContext()
+            .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}");
 
         // Add file logging for production
         if (isProduction)
