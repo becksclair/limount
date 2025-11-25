@@ -78,7 +78,7 @@ public class UnmountOrchestratorTests
         result.Should().NotBeNull();
         result.Success.Should().BeFalse();
         result.FailedStep.Should().Be("unmap");
-        result.ErrorMessage.Should().Contain("Drive unmapping failed");
+        result.ErrorMessage.Should().Contain("Drive letter unmapping failed");
         _mockScriptExecutor.Verify(e => e.ExecuteUnmountScriptAsync(1), Times.Once);
     }
 

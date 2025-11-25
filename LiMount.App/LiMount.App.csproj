@@ -23,6 +23,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Copy PowerShell scripts to output directory -->
+    <None Include="..\scripts\**\*.ps1" LinkBase="scripts">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- CommunityToolkit.Mvvm for MVVM helpers (RelayCommand, ObservableProperty, etc.) -->
     <!-- Version 8.3.2 is the latest stable for .NET 8 -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />

@@ -6,11 +6,13 @@ using System.Linq;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LiMount.App.Services;
 using LiMount.App.Views;
 using LiMount.Core.Interfaces;
+using LiMount.Core.Configuration;
 using LiMount.Core.Models;
 using LiMount.Core.Services;
 
@@ -32,6 +34,7 @@ public partial class MainViewModel : ObservableObject
     private readonly IDialogService _dialogService;
     private readonly Func<Views.HistoryWindow> _historyWindowFactory;
     private readonly ILogger<MainViewModel> _logger;
+    private readonly LiMountConfiguration _config;
 
     [ObservableProperty]
     private ObservableCollection<DiskInfo> _disks = new();
@@ -54,6 +57,11 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private string _selectedFsType = "ext4";
 
+    /// <summary>
+    /// Available filesystem types for mounting Linux partitions.
+    /// </summary>
+    public IReadOnlyList<string> FileSystemTypes { get; } = new[] { "ext4", "xfs", "btrfs", "vfat" };
+
     [ObservableProperty]
     private string _statusMessage = "Ready. Select a disk, partition, and drive letter, then click Mount.";
 
@@ -62,8 +70,6 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _canOpenExplorer;
-
-    private string? _lastMappedDriveLetter;
 
     /// <summary>
     /// The disk index of the currently mounted disk, or null if nothing is mounted.
@@ -108,6 +114,7 @@ public partial class MainViewModel : ObservableObject
     /// <param name="dialogService">Service used to display dialogs to the user.</param>
     /// <param name="historyWindowFactory">Factory for creating history window instances.</param>
     /// <param name="logger">Logger for diagnostic information.</param>
+    /// <param name="config">Configuration options for LiMount.</param>
     public MainViewModel(
         IDiskEnumerationService diskService,
         IDriveLetterService driveLetterService,
@@ -117,7 +124,8 @@ public partial class MainViewModel : ObservableObject
         IEnvironmentValidationService environmentValidationService,
         IDialogService dialogService,
         Func<Views.HistoryWindow> historyWindowFactory,
-        ILogger<MainViewModel> logger)
+        ILogger<MainViewModel> logger,
+        IOptions<LiMountConfiguration> config)
     {
         _diskService = diskService;
         _driveLetterService = driveLetterService;
@@ -128,6 +136,7 @@ public partial class MainViewModel : ObservableObject
         _dialogService = dialogService;
         _historyWindowFactory = historyWindowFactory;
         _logger = logger;
+        _config = config.Value;
 
         PropertyChanged += OnPropertyChanged;
     }
@@ -186,6 +195,24 @@ public partial class MainViewModel : ObservableObject
 
         _logger.LogInformation("Environment validation successful. WSL distros: {Distros}",
             string.Join(", ", validationResult.InstalledDistros));
+
+        // Reconcile mount state on startup if configured
+        if (_config.Initialization.AutoReconcileMounts)
+        {
+            StatusMessage = "Reconciling mount state...";
+            try
+            {
+                var orphanedMounts = await _mountStateService.ReconcileMountStateAsync();
+                if (orphanedMounts.Count > 0)
+                {
+                    _logger.LogInformation("Reconciliation found {Count} orphaned mount(s)", orphanedMounts.Count);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Mount state reconciliation failed, continuing with initialization");
+            }
+        }
 
         StatusMessage = $"Environment OK. Found {validationResult.InstalledDistros.Count} WSL distro(s). Loading disks...";
 
@@ -344,7 +371,6 @@ public partial class MainViewModel : ObservableObject
             }
 
             // Success! Track the mount state
-            _lastMappedDriveLetter = SelectedDriveLetter.ToString();
             CurrentMountedDiskIndex = SelectedDisk.Index;
             CurrentMountedPartition = SelectedPartition.PartitionNumber;
             var driveLetter = result.DriveLetter ?? SelectedDriveLetter.Value;
@@ -411,14 +437,14 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanOpenExplorerExecute))]
     private void OpenExplorer()
     {
-        if (string.IsNullOrEmpty(_lastMappedDriveLetter))
+        if (!CurrentMountedDriveLetter.HasValue)
         {
             return;
         }
 
         try
         {
-            var drivePath = $"{_lastMappedDriveLetter}:\\";
+            var drivePath = $"{CurrentMountedDriveLetter.Value}:\\";
             Process.Start("explorer.exe", drivePath);
         }
         catch (Exception ex)
@@ -433,7 +459,7 @@ public partial class MainViewModel : ObservableObject
     /// <returns>`true` if Explorer is enabled and a previously mapped drive letter is available, `false` otherwise.</returns>
     private bool CanOpenExplorerExecute()
     {
-        return CanOpenExplorer && !string.IsNullOrEmpty(_lastMappedDriveLetter);
+        return CanOpenExplorer && CurrentMountedDriveLetter.HasValue;
     }
 
     /// <summary>
@@ -494,7 +520,6 @@ public partial class MainViewModel : ObservableObject
             CurrentMountedDiskIndex = null;
             CurrentMountedPartition = null;
             CurrentMountedDriveLetter = null;
-            _lastMappedDriveLetter = null;
             CanOpenExplorer = false;
         }
         catch (Exception ex)
