@@ -400,7 +400,7 @@ public class ScriptExecutor : IScriptExecutor
     public async Task<string?> DetectFilesystemTypeAsync(int diskIndex, int partitionNumber)
     {
         var diskPath = $@"\\.\PHYSICALDRIVE{diskIndex}";
-        _logger.LogInformation("Detecting filesystem type for disk {DiskIndex} partition {Partition}", diskIndex, partitionNumber);
+        _logger?.LogInformation("Detecting filesystem type for disk {DiskIndex} partition {Partition}", diskIndex, partitionNumber);
 
         try
         {
@@ -410,12 +410,12 @@ public class ScriptExecutor : IScriptExecutor
             if (alreadyMounted)
             {
                 // Disk is already mounted - just run lsblk directly
-                _logger.LogInformation("Disk {DiskIndex} is already mounted, reading filesystem type directly", diskIndex);
+                _logger?.LogInformation("Disk {DiskIndex} is already mounted, reading filesystem type directly", diskIndex);
                 var lsblkResult = await RunWslCommandAsync("lsblk -f -o NAME,FSTYPE -P");
                 if (lsblkResult.Success && !string.IsNullOrEmpty(lsblkResult.Output))
                 {
                     var fsType = ParseLsblkOutput(lsblkResult.Output, partitionNumber);
-                    _logger.LogInformation("Detected filesystem type: {FsType}", fsType ?? "unknown");
+                    _logger?.LogInformation("Detected filesystem type: {FsType}", fsType ?? "unknown");
                     return fsType;
                 }
                 return null;
@@ -428,14 +428,14 @@ public class ScriptExecutor : IScriptExecutor
                 // Check if already mounted error
                 if (attachResult.Error?.Contains("already mounted", StringComparison.OrdinalIgnoreCase) == true)
                 {
-                    _logger.LogInformation("Disk already mounted, trying lsblk directly");
+                    _logger?.LogInformation("Disk already mounted, trying lsblk directly");
                     var lsblkResult = await RunWslCommandAsync("lsblk -f -o NAME,FSTYPE -P");
                     if (lsblkResult.Success && !string.IsNullOrEmpty(lsblkResult.Output))
                     {
                         return ParseLsblkOutput(lsblkResult.Output, partitionNumber);
                     }
                 }
-                _logger.LogWarning("Failed to attach disk for filesystem detection: {Error}", attachResult.Error);
+                _logger?.LogWarning("Failed to attach disk for filesystem detection: {Error}", attachResult.Error);
                 return null;
             }
 
@@ -445,7 +445,7 @@ public class ScriptExecutor : IScriptExecutor
                 var lsblkResult = await RunWslCommandAsync("lsblk -f -o NAME,FSTYPE -P");
                 if (!lsblkResult.Success || string.IsNullOrEmpty(lsblkResult.Output))
                 {
-                    _logger.LogWarning("Failed to run lsblk: {Error}", lsblkResult.Error);
+                    _logger?.LogWarning("Failed to run lsblk: {Error}", lsblkResult.Error);
                     return null;
                 }
 
@@ -453,7 +453,7 @@ public class ScriptExecutor : IScriptExecutor
                 // Looking for the partition that corresponds to the disk we attached
                 // Format: NAME="sde1" FSTYPE="xfs"
                 var fsType = ParseLsblkOutput(lsblkResult.Output, partitionNumber);
-                _logger.LogInformation("Detected filesystem type: {FsType}", fsType ?? "unknown");
+                _logger?.LogInformation("Detected filesystem type: {FsType}", fsType ?? "unknown");
                 return fsType;
             }
             finally
@@ -464,7 +464,7 @@ public class ScriptExecutor : IScriptExecutor
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error detecting filesystem type for disk {DiskIndex}", diskIndex);
+            _logger?.LogError(ex, "Error detecting filesystem type for disk {DiskIndex}", diskIndex);
             return null;
         }
     }

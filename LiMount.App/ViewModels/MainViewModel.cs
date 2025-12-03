@@ -400,6 +400,7 @@ public partial class MainViewModel : ObservableObject
                 
                 UnmountCommand.NotifyCanExecuteChanged();
                 OpenExplorerCommand.NotifyCanExecuteChanged();
+                MountCommand.NotifyCanExecuteChanged();
             }
             else
             {
@@ -666,6 +667,7 @@ public partial class MainViewModel : ObservableObject
             // Notify commands that mount state changed
             UnmountCommand.NotifyCanExecuteChanged();
             OpenExplorerCommand.NotifyCanExecuteChanged();
+            MountCommand.NotifyCanExecuteChanged();
 
             // Register mount state persistently
             var activeMount = new ActiveMount
@@ -712,6 +714,7 @@ public partial class MainViewModel : ObservableObject
     private bool CanMount()
     {
         return !IsBusy &&
+               !IsMounted &&
                SelectedDisk != null &&
                SelectedPartition != null &&
                SelectedDriveLetter != null;
@@ -811,6 +814,7 @@ public partial class MainViewModel : ObservableObject
             CurrentMountedPartition = null;
             CurrentMountedDriveLetter = null;
             CanOpenExplorer = false;
+            MountCommand.NotifyCanExecuteChanged();
         }
         catch (Exception ex)
         {
