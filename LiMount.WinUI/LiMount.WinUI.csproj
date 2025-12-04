@@ -82,6 +82,11 @@
         <LinkerArg Include="/LIBPATH:&quot;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\lib\x64&quot;" />
     </ItemGroup>
 
+    <ItemGroup Condition="'$(PublishTrimmed)' == 'true' or '$(PublishAot)' == 'true'">
+        <TrimmerRootAssembly Include="Microsoft.Web.WebView2.Core" />
+        <TrimmerRootAssembly Include="Serilog" />
+    </ItemGroup>
+
     <ItemGroup>
         <ProjectReference Include="..\\LiMount.Core\\LiMount.Core.csproj" />
     </ItemGroup>
