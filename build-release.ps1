@@ -17,7 +17,8 @@
 #>
 
 param(
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+    [string]$Platform = "Any CPU"
 )
 
 # Set strict error handling
@@ -52,15 +53,18 @@ Write-Success "Validated project root directory"
 $projectRoot = (Get-Location).Path
 $appProject = Join-Path $projectRoot "LiMount.App\LiMount.App.csproj"
 $outputPath = Join-Path $projectRoot "LiMount.App\bin\publish\win-x64"
+$artifactDir = Join-Path $projectRoot "bin"
+$platformProperty = "-p:Platform=$Platform"
 
 Write-Info "Project root: $projectRoot"
 Write-Info "Configuration: $Configuration"
+Write-Info "Platform: $Platform"
 Write-Info ""
 
 # Step 1: Clean previous builds
 Write-Info "Cleaning previous builds..."
 try {
-    dotnet clean $solutionFile --configuration $Configuration
+    dotnet clean $solutionFile --configuration $Configuration $platformProperty
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet clean failed with exit code $LASTEXITCODE"
     }
@@ -75,7 +79,7 @@ Write-Info ""
 # Step 2: Restore NuGet packages
 Write-Info "Restoring NuGet packages..."
 try {
-    dotnet restore $solutionFile
+    dotnet restore $solutionFile $platformProperty
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet restore failed with exit code $LASTEXITCODE"
     }
@@ -90,7 +94,7 @@ Write-Info ""
 # Step 3: Publish using win-x64 profile
 Write-Info "Publishing application (self-contained, single-file)..."
 try {
-    dotnet publish $appProject -p:PublishProfile=win-x64 --configuration $Configuration
+    dotnet publish $appProject -p:PublishProfile=win-x64 --configuration $Configuration $platformProperty
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish failed with exit code $LASTEXITCODE"
     }
@@ -108,6 +112,14 @@ $exePath = Join-Path $outputPath "LiMount.App.exe"
 if (Test-Path $exePath) {
     $fileInfo = Get-Item $exePath
     $fileSizeMB = [math]::Round($fileInfo.Length / 1MB, 2)
+
+    # Copy to root-level bin folder for easy pickup
+    if (-not (Test-Path $artifactDir)) {
+        New-Item -ItemType Directory -Path $artifactDir | Out-Null
+    }
+
+    $copiedExePath = Join-Path $artifactDir "LiMount.App.exe"
+    Copy-Item -Path $exePath -Destination $copiedExePath -Force
     
     Write-Success "=========================================="
     Write-Success "Build completed successfully!"
@@ -115,6 +127,7 @@ if (Test-Path $exePath) {
     Write-Info ""
     Write-Info "Output location: $outputPath"
     Write-Info "Executable: LiMount.App.exe"
+    Write-Info "Copied artifact: $copiedExePath"
     Write-Info "File size: $fileSizeMB MB"
     Write-Info ""
     Write-Success "The application is ready for distribution."
