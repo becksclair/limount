@@ -21,8 +21,12 @@
 .PARAMETER DistroName
     Optional: Specific WSL distribution name to use.
 
+.PARAMETER OutputFile
+    Required: GUID-based temp file path where output will be written.
+    This prevents predictable temp file attacks (CWE-377).
+
 .EXAMPLE
-    .\Mount-LinuxDiskCore.ps1 -DiskIndex 2 -Partition 1 -FsType ext4
+    .\Mount-LinuxDiskCore.ps1 -DiskIndex 2 -Partition 1 -FsType ext4 -OutputFile "C:\Users\...\Temp\limount_mount_abc123.txt"
 
 .NOTES
     Requires Windows 11 Build 22000+ or Microsoft Store WSL.
@@ -42,7 +46,10 @@ param(
     [string]$FsType = "auto",
 
     [Parameter(Mandatory=$false)]
-    [string]$DistroName
+    [string]$DistroName,
+
+    [Parameter(Mandatory=$true)]
+    [string]$OutputFile
 )
 
 # Function to output result and exit
@@ -72,10 +79,9 @@ function Write-Result {
     # Write to stdout
     $output | ForEach-Object { Write-Output $_ }
 
-    # Also write to temp file for elevated scenarios where stdout can't be captured
+    # Write to the GUID-based temp file provided by the caller (prevents predictable temp file attacks)
     try {
-        $tempFile = Join-Path $env:TEMP "limount_mount_${DiskIndex}_${Partition}.txt"
-        $output | Out-File -FilePath $tempFile -Encoding UTF8 -Force
+        $output | Out-File -FilePath $OutputFile -Encoding UTF8 -Force
     } catch {
         # Ignore errors writing temp file
     }

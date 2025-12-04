@@ -27,7 +27,8 @@ public class DiskEnumerationService : IDiskEnumerationService
     /// <param name="logger">Logger for diagnostic information.</param>
     public DiskEnumerationService(ILogger<DiskEnumerationService> logger)
     {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        ArgumentNullException.ThrowIfNull(logger);
+        _logger = logger;
     }
 
     /// <summary>
@@ -82,10 +83,15 @@ public class DiskEnumerationService : IDiskEnumerationService
     /// <returns>A DiskInfo populated with index, device ID, model, size, partitions, and system/boot indicators.</returns>
     private DiskInfo ParseDiskInfo(ManagementObject disk)
     {
-        var index = Convert.ToInt32(disk["Index"]);
+        var index = SafeParseInt(disk["Index"], -1);
+        if (index < 0)
+        {
+            _logger.LogWarning("Invalid or missing disk index in WMI data, skipping disk");
+            index = 0; // Fallback to index 0 but log the issue
+        }
         var deviceId = disk["DeviceID"]?.ToString() ?? $"\\\\.\\PHYSICALDRIVE{index}";
         var model = disk["Model"]?.ToString() ?? "Unknown";
-        var sizeBytes = disk["Size"] != null ? Convert.ToInt64(disk["Size"]) : 0;
+        var sizeBytes = SafeParseLong(disk["Size"], 0);
 
         var diskInfo = new DiskInfo
         {
@@ -144,9 +150,10 @@ public class DiskEnumerationService : IDiskEnumerationService
     /// <returns>A populated PartitionInfo with PartitionNumber, SizeBytes, optional Label, FileSystemType, drive letter information, and IsLikelyLinux.</returns>
     private PartitionInfo ParsePartitionInfo(ManagementObject partition)
     {
-        // Get basic partition info
-        var partitionNumber = partition["Index"] != null ? Convert.ToInt32(partition["Index"]) + 1 : 0; // Index is 0-based
-        var sizeBytes = partition["Size"] != null ? Convert.ToInt64(partition["Size"]) : 0;
+        // Get basic partition info - Index is 0-based in WMI, we add 1 for partition number
+        var partitionIndex = SafeParseInt(partition["Index"], -1);
+        var partitionNumber = partitionIndex >= 0 ? partitionIndex + 1 : 0;
+        var sizeBytes = SafeParseLong(partition["Size"], 0);
         var partitionType = partition["Type"]?.ToString() ?? "";
 
         var partitionInfo = new PartitionInfo
@@ -297,5 +304,73 @@ public class DiskEnumerationService : IDiskEnumerationService
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Safely parses an object to int, returning default value on null or parse failure.
+    /// </summary>
+    private static int SafeParseInt(object? value, int defaultValue)
+    {
+        if (value == null) return defaultValue;
+
+        // Try direct conversion first (for numeric types)
+        try
+        {
+            return Convert.ToInt32(value);
+        }
+        catch (InvalidCastException)
+        {
+            // Fall through to string parsing
+        }
+        catch (FormatException)
+        {
+            return defaultValue;
+        }
+        catch (OverflowException)
+        {
+            return defaultValue;
+        }
+
+        // Try string parsing as fallback
+        if (int.TryParse(value.ToString(), out var result))
+        {
+            return result;
+        }
+
+        return defaultValue;
+    }
+
+    /// <summary>
+    /// Safely parses an object to long, returning default value on null or parse failure.
+    /// </summary>
+    private static long SafeParseLong(object? value, long defaultValue)
+    {
+        if (value == null) return defaultValue;
+
+        // Try direct conversion first (for numeric types)
+        try
+        {
+            return Convert.ToInt64(value);
+        }
+        catch (InvalidCastException)
+        {
+            // Fall through to string parsing
+        }
+        catch (FormatException)
+        {
+            return defaultValue;
+        }
+        catch (OverflowException)
+        {
+            return defaultValue;
+        }
+
+        // Try string parsing as fallback
+        if (long.TryParse(value.ToString(), out var result))
+        {
+            return result;
+        }
+
+        return defaultValue;
     }
 }

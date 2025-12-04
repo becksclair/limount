@@ -495,6 +495,13 @@ _Added: 2025-11-25 based on architecture review_
 - [x] Add CHANGELOG.md
 - [ ] Final verification on clean Windows machine
 
+### Phase 4: Multi-partition Handling
+
+- [ ] Allow concurrent mounts of multiple partitions on the same disk
+  - Update `MountStateService.RegisterMountAsync` to stop removing existing mounts by `DiskIndex` (key by Id/disk+partition instead)
+  - Add reconciliation coverage to ensure per-partition verification remains distinct
+  - Add/adjust unit tests for multi-partition scenarios
+
 ---
 
 ## Notes

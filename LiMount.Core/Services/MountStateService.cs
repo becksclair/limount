@@ -41,13 +41,14 @@ public class MountStateService : IMountStateService, IDisposable
         IOptions<LiMountConfiguration> configuration,
         string? stateFilePath = null)
     {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _driveLetterService = driveLetterService ?? throw new ArgumentNullException(nameof(driveLetterService));
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(driveLetterService);
+        ArgumentNullException.ThrowIfNull(configuration);
 
-        if (configuration?.Value is not { } config)
-        {
-            throw new ArgumentNullException(nameof(configuration));
-        }
+        _logger = logger;
+        _driveLetterService = driveLetterService;
+
+        var config = configuration.Value;
 
         _reconcileUncCheckTimeoutMs = Math.Clamp(
             config.MountOperations.ReconcileUncAccessibilityTimeoutMs,
@@ -216,11 +217,13 @@ public class MountStateService : IMountStateService, IDisposable
         {
             var mounts = await LoadMountsInternalAsync();
             var orphanedMounts = new List<ActiveMount>();
+            var validMounts = new List<ActiveMount>();
 
             var usedDriveLetters = new HashSet<char>(_driveLetterService.GetUsedLetters()
                 .Select(char.ToUpperInvariant));
 
-            foreach (var mount in mounts.ToList())
+            // Phase 1: Quick synchronous check for drive letter validity
+            foreach (var mount in mounts)
             {
                 var normalizedLetter = char.ToUpperInvariant(mount.DriveLetter);
                 var hasValidLetter = normalizedLetter >= 'A' && normalizedLetter <= 'Z';
@@ -231,15 +234,35 @@ public class MountStateService : IMountStateService, IDisposable
                     _logger.LogWarning(
                         "Found orphaned mount: Disk {DiskIndex} -> Drive {DriveLetter}: (drive letter no longer mapped)",
                         mount.DiskIndex, mount.DriveLetter);
-
                     orphanedMounts.Add(mount);
-                    mounts.Remove(mount);
-                    continue;
                 }
-
-                if (!string.IsNullOrEmpty(mount.MountPathUNC))
+                else
                 {
-                    var accessible = await TryVerifyUncAccessibilityAsync(mount.MountPathUNC);
+                    validMounts.Add(mount);
+                }
+            }
+
+            // Phase 2: Parallel UNC path verification for valid mounts
+            // Track verification results to properly set IsVerified flag
+            var uncVerificationResults = new Dictionary<string, bool>(); // MountId/unique key -> accessible
+
+            var uncVerificationTasks = validMounts
+                .Where(m => !string.IsNullOrEmpty(m.MountPathUNC))
+                .Select(async mount =>
+                {
+                    var accessible = await TryVerifyUncAccessibilityAsync(mount.MountPathUNC!);
+                    return (mount, accessible);
+                })
+                .ToList();
+
+            if (uncVerificationTasks.Count > 0)
+            {
+                var results = await Task.WhenAll(uncVerificationTasks);
+
+                foreach (var (mount, accessible) in results)
+                {
+                    uncVerificationResults[GetVerificationKey(mount)] = accessible;
+
                     if (!accessible)
                     {
                         _logger.LogWarning(
@@ -249,14 +272,32 @@ public class MountStateService : IMountStateService, IDisposable
                             mount.DriveLetter);
                     }
                 }
+            }
 
-                mount.IsVerified = true;
-                mount.LastVerified = DateTime.Now;
+            // Phase 3: Update verified status based on actual verification results
+            // - Mounts with UNC paths: verified only if UNC is accessible
+            // - Mounts without UNC paths: verified based on drive letter check (already passed Phase 1)
+            var now = DateTime.Now;
+            foreach (var mount in validMounts)
+            {
+                if (!string.IsNullOrEmpty(mount.MountPathUNC))
+                {
+                    // Has UNC path - use verification result
+                    mount.IsVerified = uncVerificationResults.TryGetValue(
+                        GetVerificationKey(mount),
+                        out var accessible) && accessible;
+                }
+                else
+                {
+                    // No UNC path - drive letter check in Phase 1 is the only verification possible
+                    mount.IsVerified = true;
+                }
+                mount.LastVerified = now;
             }
 
             if (orphanedMounts.Count > 0)
             {
-                await SaveMountsInternalAsync(mounts);
+                await SaveMountsInternalAsync(validMounts);
                 _logger.LogInformation("Reconciliation removed {Count} orphaned mounts", orphanedMounts.Count);
             }
 
@@ -344,6 +385,16 @@ public class MountStateService : IMountStateService, IDisposable
         }
     }
 
+    private static string GetVerificationKey(ActiveMount mount)
+    {
+        if (!string.IsNullOrWhiteSpace(mount.Id))
+        {
+            return mount.Id;
+        }
+
+        return $"{mount.DiskIndex}:{mount.PartitionNumber}";
+    }
+
     private async Task<bool> TryVerifyUncAccessibilityAsync(string uncPath)
     {
         try
@@ -352,7 +403,8 @@ public class MountStateService : IMountStateService, IDisposable
             var completedTask = await Task.WhenAny(checkTask, Task.Delay(_reconcileUncCheckTimeoutMs));
             if (completedTask == checkTask)
             {
-                return checkTask.Result;
+                // Use await instead of .Result to avoid potential deadlock in WPF sync context
+                return await checkTask;
             }
 
             _logger.LogWarning(
@@ -362,9 +414,14 @@ public class MountStateService : IMountStateService, IDisposable
 
             return false;
         }
-        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+        catch (IOException ex)
         {
-            _logger.LogWarning(ex, "Failed to verify UNC accessibility for {UNC}", uncPath);
+            _logger.LogWarning(ex, "IO error verifying UNC accessibility for {UNC}", uncPath);
+            return false;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Access denied verifying UNC accessibility for {UNC}", uncPath);
             return false;
         }
     }

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using LiMount.Core.Interfaces;
@@ -15,6 +16,10 @@ namespace LiMount.Core.Services;
 [SupportedOSPlatform("windows")]
 public class ScriptExecutor : IScriptExecutor
 {
+    // Compiled regex patterns for efficient parsing of lsblk output
+    private static readonly Regex NameRegex = new(@"NAME=""([^""]+)""", RegexOptions.Compiled);
+    private static readonly Regex FsTypeRegex = new(@"FSTYPE=""([^""]*)""", RegexOptions.Compiled);
+
     private readonly string _scriptsPath;
     private readonly ILogger<ScriptExecutor>? _logger;
     private readonly ScriptExecutionConfig _config;
@@ -88,15 +93,22 @@ public class ScriptExecutor : IScriptExecutor
         }
 
         var trimmedFsType = fsType.Trim();
+
+        // Generate GUID-based temp file path BEFORE script execution to prevent
+        // predictable temp file attacks (CWE-377: Insecure Temporary File)
+        var tempFileId = Guid.NewGuid().ToString("N");
+        var tempOutputFile = Path.Combine(Path.GetTempPath(), $"limount_mount_{tempFileId}.txt");
+
         var arguments = $"-ExecutionPolicy Bypass -File \"{scriptPath}\" " +
-                       $"-DiskIndex {diskIndex} -Partition {partition} -FsType {trimmedFsType}";
+                       $"-DiskIndex {diskIndex} -Partition {partition} -FsType {trimmedFsType} " +
+                       $"-OutputFile \"{tempOutputFile}\"";
 
         if (!string.IsNullOrEmpty(distroName))
         {
             arguments += $" -DistroName \"{distroName}\"";
         }
 
-        var output = await ExecuteElevatedScriptAsync("powershell.exe", arguments, diskIndex, partition);
+        var output = await ExecuteElevatedScriptAsync("powershell.exe", arguments, tempOutputFile);
         var parsedValues = KeyValueOutputParser.Parse(output);
         return MountResult.FromDictionary(parsedValues);
     }
@@ -185,9 +197,15 @@ public class ScriptExecutor : IScriptExecutor
             };
         }
 
-        var arguments = $"-ExecutionPolicy Bypass -File \"{scriptPath}\" -DiskIndex {diskIndex}";
+        // Generate GUID-based temp file path BEFORE script execution to prevent
+        // predictable temp file attacks (CWE-377: Insecure Temporary File)
+        var tempFileId = Guid.NewGuid().ToString("N");
+        var tempOutputFile = Path.Combine(Path.GetTempPath(), $"limount_unmount_{tempFileId}.txt");
 
-        var output = await ExecuteElevatedScriptAsync("powershell.exe", arguments, diskIndex, 0, isUnmountOperation: true);
+        var arguments = $"-ExecutionPolicy Bypass -File \"{scriptPath}\" -DiskIndex {diskIndex} " +
+                       $"-OutputFile \"{tempOutputFile}\"";
+
+        var output = await ExecuteElevatedScriptAsync("powershell.exe", arguments, tempOutputFile);
         var parsedValues = KeyValueOutputParser.Parse(output);
         return UnmountResult.FromDictionary(parsedValues);
     }
@@ -245,17 +263,19 @@ public class ScriptExecutor : IScriptExecutor
     /// </summary>
     /// <param name="fileName">The executable to run (e.g., "powershell.exe").</param>
     /// <param name="arguments">The arguments to pass to the executable.</param>
-    /// <param name="diskIndex">Disk index used to construct the temporary output filename.</param>
-    /// <param name="partition">Partition number used to construct the temporary output filename.</param>
-    /// <param name="isUnmountOperation">Whether this is an unmount operation (uses different filename pattern).</param>
+    /// <param name="tempOutputFile">The GUID-based temp file path where the script will write output.</param>
     /// <returns>The contents of the temporary output file when successful; otherwise a string beginning with "STATUS=ERROR" and an error message.</returns>
     private async Task<string> ExecuteElevatedScriptAsync(
         string fileName,
         string arguments,
-        int diskIndex,
-        int partition,
-        bool isUnmountOperation = false)
+        string tempOutputFile)
     {
+        // SECURITY AUDIT: Log all elevated operation requests for audit trail
+        var correlationId = Path.GetFileNameWithoutExtension(tempOutputFile);
+        _logger?.LogInformation(
+            "SECURITY AUDIT: Elevated operation requested. CorrelationId={CorrelationId}, Executable={FileName}, TempFile={TempFile}, Timestamp={Timestamp:O}",
+            correlationId, fileName, tempOutputFile, DateTime.UtcNow);
+
         var startInfo = new ProcessStartInfo
         {
             FileName = fileName,
@@ -276,15 +296,10 @@ public class ScriptExecutor : IScriptExecutor
 
             await process.WaitForExitAsync();
 
-            // Read output from temp file (script writes there for elevated scenarios)
-            var tempOutputFile = isUnmountOperation
-                ? Path.Combine(Path.GetTempPath(), $"limount_unmount_{diskIndex}.txt")
-                : Path.Combine(Path.GetTempPath(), $"limount_mount_{diskIndex}_{partition}.txt");
-
-            // Wait for file to be written - normalize config values to prevent issues
+            // Wait for the GUID-based temp file to be written by the script
             var normalizedTimeoutSeconds = Math.Max(0, Math.Min(_config.TempFilePollingTimeoutSeconds, 300));
             var normalizedPollingIntervalMs = Math.Max(1, Math.Min(_config.PollingIntervalMs, 10000));
-            
+
             var timeout = TimeSpan.FromSeconds(normalizedTimeoutSeconds);
             var pollingInterval = TimeSpan.FromMilliseconds(normalizedPollingIntervalMs);
             var totalWaitTime = TimeSpan.Zero;
@@ -292,7 +307,9 @@ public class ScriptExecutor : IScriptExecutor
             while (totalWaitTime < timeout)
             {
                 if (File.Exists(tempOutputFile))
+                {
                     break;
+                }
 
                 await Task.Delay(pollingInterval);
                 totalWaitTime += pollingInterval;
@@ -300,24 +317,43 @@ public class ScriptExecutor : IScriptExecutor
 
             if (File.Exists(tempOutputFile))
             {
-                var output = await File.ReadAllTextAsync(tempOutputFile);
                 try
                 {
-                    File.Delete(tempOutputFile);
+                    var output = await File.ReadAllTextAsync(tempOutputFile);
+                    try
+                    {
+                        File.Delete(tempOutputFile);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogWarning(ex, "Failed to delete temp file {TempFile}", tempOutputFile);
+                    }
+                    return output;
                 }
-                catch (Exception ex)
+                catch (IOException ex)
                 {
-                    _logger?.LogWarning(ex, "Failed to delete temp file {TempFile}", tempOutputFile);
+                    _logger?.LogWarning(ex, "Failed to read temp file {TempFile}, may be locked by another process", tempOutputFile);
+                    return $"STATUS=ERROR\nErrorMessage=Failed to read output file: {ex.Message}";
                 }
-                return output;
             }
 
             // Temp output file not found - treat as error regardless of exit code
             return $"STATUS=ERROR\nErrorMessage=Elevated script produced no output. Expected temp file: {tempOutputFile}, Process exit code: {process.ExitCode}";
         }
+        catch (OperationCanceledException)
+        {
+            throw; // Let cancellation propagate
+        }
+        catch (OutOfMemoryException)
+        {
+            throw; // Critical: OOM should not be swallowed
+        }
         catch (Exception ex)
         {
-            return $"STATUS=ERROR\nErrorMessage={ex.Message}";
+            var errorDetails = ex.InnerException != null
+                ? $"{ex.Message} (Inner: {ex.InnerException.Message})"
+                : ex.Message;
+            return $"STATUS=ERROR\nErrorMessage={errorDetails}";
         }
     }
 
@@ -361,9 +397,20 @@ public class ScriptExecutor : IScriptExecutor
 
             return (output, error);
         }
+        catch (OperationCanceledException)
+        {
+            throw; // Let cancellation propagate
+        }
+        catch (OutOfMemoryException)
+        {
+            throw; // Critical: OOM should not be swallowed
+        }
         catch (Exception ex)
         {
-            return ($"STATUS=ERROR\nErrorMessage={ex.Message}", string.Empty);
+            var errorDetails = ex.InnerException != null
+                ? $"{ex.Message} (Inner: {ex.InnerException.Message})"
+                : ex.Message;
+            return ($"STATUS=ERROR\nErrorMessage={errorDetails}", string.Empty);
         }
     }
 
@@ -540,6 +587,13 @@ public class ScriptExecutor : IScriptExecutor
     /// <summary>
     /// Runs a non-elevated WSL command and captures output.
     /// </summary>
+    /// <remarks>
+    /// SECURITY WARNING: The <paramref name="linuxCommand"/> parameter is passed directly to
+    /// wsl.exe without sanitization. This method MUST only be called with hard-coded,
+    /// trusted command strings. NEVER pass user-controlled input to this method as it could
+    /// lead to command injection attacks. All current usages pass hard-coded commands like
+    /// "lsblk -f -o NAME,FSTYPE -P" or "-l -q" which are safe.
+    /// </remarks>
     private async Task<(bool Success, string? Output, string? Error)> RunWslCommandAsync(string linuxCommand)
     {
         try
@@ -547,6 +601,8 @@ public class ScriptExecutor : IScriptExecutor
             var startInfo = new ProcessStartInfo
             {
                 FileName = "wsl.exe",
+                // SECURITY: linuxCommand is only ever called with hard-coded strings.
+                // Do not refactor to accept user input without proper validation.
                 Arguments = $"-e {linuxCommand}",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
@@ -586,11 +642,11 @@ public class ScriptExecutor : IScriptExecutor
         foreach (var line in lines)
         {
             // Look for partition entries (e.g., sd*1, sd*2)
-            if (line.Contains($"NAME=\"") && line.Contains("FSTYPE=\""))
+            if (line.Contains("NAME=\"") && line.Contains("FSTYPE=\""))
             {
-                // Extract NAME and FSTYPE
-                var nameMatch = System.Text.RegularExpressions.Regex.Match(line, @"NAME=""([^""]+)""");
-                var fsTypeMatch = System.Text.RegularExpressions.Regex.Match(line, @"FSTYPE=""([^""]*)""");
+                // Extract NAME and FSTYPE using pre-compiled static regex patterns
+                var nameMatch = NameRegex.Match(line);
+                var fsTypeMatch = FsTypeRegex.Match(line);
 
                 if (nameMatch.Success && fsTypeMatch.Success)
                 {

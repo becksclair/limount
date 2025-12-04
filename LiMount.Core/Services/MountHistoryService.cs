@@ -11,13 +11,23 @@ namespace LiMount.Core.Services;
 /// <summary>
 /// Service for tracking and persisting mount/unmount operation history to JSON file.
 /// </summary>
+/// <remarks>
+/// This class is thread-safe. All public methods use internal locking to ensure
+/// consistency when accessed from multiple threads.
+/// </remarks>
 [SupportedOSPlatform("windows")]
-public class MountHistoryService : IMountHistoryService
+public class MountHistoryService : IMountHistoryService, IDisposable
 {
+    /// <summary>
+    /// Maximum allowed history entries to prevent memory exhaustion from misconfiguration.
+    /// </summary>
+    private const int MaxAllowedEntries = 10000;
+
     private readonly ILogger<MountHistoryService> _logger;
     private readonly string _historyFilePath;
     private readonly int _maxEntries;
     private readonly SemaphoreSlim _fileLock = new(1, 1);
+    private bool _disposed;
 
     /// <summary>
     /// Initializes a new instance of <see cref="MountHistoryService"/>.
@@ -30,15 +40,28 @@ public class MountHistoryService : IMountHistoryService
         IOptions<LiMountConfiguration>? config = null,
         string? historyFilePath = null)
     {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        ArgumentNullException.ThrowIfNull(logger);
+        _logger = logger;
         _historyFilePath = historyFilePath ?? GetDefaultHistoryFilePath();
-        _maxEntries = Math.Max(1, config?.Value?.History?.MaxEntries ?? 100);
+        // Clamp maxEntries to reasonable range (1-10000) to prevent memory exhaustion
+        _maxEntries = Math.Clamp(config?.Value?.History?.MaxEntries ?? 100, 1, MaxAllowedEntries);
 
         // Ensure directory exists
         var directory = Path.GetDirectoryName(_historyFilePath);
         if (!string.IsNullOrEmpty(directory))
         {
             Directory.CreateDirectory(directory);
+        }
+    }
+
+    /// <summary>
+    /// Throws ObjectDisposedException if this instance has been disposed.
+    /// </summary>
+    private void ThrowIfDisposed()
+    {
+        if (_disposed)
+        {
+            throw new ObjectDisposedException(nameof(MountHistoryService));
         }
     }
 
@@ -56,17 +79,22 @@ public class MountHistoryService : IMountHistoryService
     /// </summary>
     public async Task AddEntryAsync(MountHistoryEntry entry)
     {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(entry);
+
         await _fileLock.WaitAsync();
         try
         {
             var history = await LoadHistoryInternalAsync();
-            history.Add(entry);
 
-            // Keep only the last configured number of entries to prevent unbounded growth
-            if (history.Count > _maxEntries)
+            // Trim BEFORE adding to prevent temporary memory overflow
+            // Keep only the last (maxEntries - 1) entries to make room for the new one
+            if (history.Count >= _maxEntries)
             {
-                history = history.OrderByDescending(e => e.Timestamp).Take(_maxEntries).ToList();
+                history = history.OrderByDescending(e => e.Timestamp).Take(_maxEntries - 1).ToList();
             }
+
+            history.Add(entry);
 
             await SaveHistoryInternalAsync(history);
 
@@ -88,6 +116,8 @@ public class MountHistoryService : IMountHistoryService
     /// </summary>
     public async Task<IReadOnlyList<MountHistoryEntry>> GetHistoryAsync()
     {
+        ThrowIfDisposed();
+
         await _fileLock.WaitAsync();
         try
         {
@@ -110,6 +140,8 @@ public class MountHistoryService : IMountHistoryService
     /// </summary>
     public async Task ClearHistoryAsync()
     {
+        ThrowIfDisposed();
+
         await _fileLock.WaitAsync();
         try
         {
@@ -131,14 +163,30 @@ public class MountHistoryService : IMountHistoryService
     /// </summary>
     public async Task<MountHistoryEntry?> GetLastMountForDiskAsync(int diskIndex)
     {
+        ThrowIfDisposed();
+
         await _fileLock.WaitAsync();
         try
         {
             var history = await LoadHistoryInternalAsync();
-            return history
-                .Where(e => e.DiskIndex == diskIndex && e.OperationType == MountHistoryOperationType.Mount && e.Success)
-                .OrderByDescending(e => e.Timestamp)
-                .FirstOrDefault();
+
+            // Single-pass iteration to find the most recent matching entry (O(n) instead of O(n log n))
+            MountHistoryEntry? lastMount = null;
+            DateTime? latestTimestamp = null;
+
+            foreach (var entry in history)
+            {
+                if (entry.DiskIndex == diskIndex &&
+                    entry.OperationType == MountHistoryOperationType.Mount &&
+                    entry.Success &&
+                    (latestTimestamp == null || entry.Timestamp > latestTimestamp))
+                {
+                    lastMount = entry;
+                    latestTimestamp = entry.Timestamp;
+                }
+            }
+
+            return lastMount;
         }
         catch (Exception ex)
         {
@@ -186,5 +234,30 @@ public class MountHistoryService : IMountHistoryService
 
         var json = JsonSerializer.Serialize(history, options);
         await File.WriteAllTextAsync(_historyFilePath, json);
+    }
+
+    /// <summary>
+    /// Releases all resources used by the <see cref="MountHistoryService"/>.
+    /// </summary>
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Releases resources used by the <see cref="MountHistoryService"/>.
+    /// </summary>
+    /// <param name="disposing">True if called from Dispose(), false if from finalizer.</param>
+    protected virtual void Dispose(bool disposing)
+    {
+        if (!_disposed)
+        {
+            if (disposing)
+            {
+                _fileLock?.Dispose();
+            }
+            _disposed = true;
+        }
     }
 }

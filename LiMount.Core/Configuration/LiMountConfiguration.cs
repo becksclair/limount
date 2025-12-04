@@ -67,6 +67,21 @@ public class MountOperationsConfig
     /// Timeout in milliseconds when checking UNC path accessibility during reconciliation.
     /// </summary>
     public int ReconcileUncAccessibilityTimeoutMs { get; set; } = 2000;
+
+    /// <summary>
+    /// Timeout in milliseconds for UNC path accessibility checks in the UI.
+    /// </summary>
+    public int UncPathCheckTimeoutMs { get; set; } = 2000;
+
+    /// <summary>
+    /// Timeout in milliseconds for subst command execution.
+    /// </summary>
+    public int SubstCommandTimeoutMs { get; set; } = 5000;
+
+    /// <summary>
+    /// Timeout in milliseconds for WSL command execution.
+    /// </summary>
+    public int WslCommandTimeoutMs { get; set; } = 5000;
 }
 
 /// <summary>

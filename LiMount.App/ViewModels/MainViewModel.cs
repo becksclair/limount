@@ -344,11 +344,31 @@ public partial class MainViewModel : ObservableObject
             if (activeMounts.Count > 0)
             {
                 var mount = activeMounts.First();
-                
+
                 // Verify the mount is still valid by checking if the UNC path exists
-                var uncPathExists = !string.IsNullOrEmpty(mount.MountPathUNC) && 
-                                    Directory.Exists(mount.MountPathUNC);
-                
+                // Use Task.Run with timeout to avoid blocking UI thread on slow/unresponsive network paths
+                var uncPathExists = false;
+                if (!string.IsNullOrEmpty(mount.MountPathUNC))
+                {
+                    try
+                    {
+                        var checkTask = Task.Run(() => Directory.Exists(mount.MountPathUNC));
+                        var timeoutMs = _config.MountOperations.UncPathCheckTimeoutMs;
+                        if (await Task.WhenAny(checkTask, Task.Delay(timeoutMs)) == checkTask)
+                        {
+                            uncPathExists = await checkTask;
+                        }
+                        else
+                        {
+                            _logger.LogWarning("UNC path check timed out after {TimeoutMs}ms for {UNC}", timeoutMs, mount.MountPathUNC);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to verify UNC path {UNC}", mount.MountPathUNC);
+                    }
+                }
+
                 if (uncPathExists)
                 {
                     CurrentMountedDiskIndex = mount.DiskIndex;
@@ -362,6 +382,7 @@ public partial class MainViewModel : ObservableObject
                     
                     UnmountCommand.NotifyCanExecuteChanged();
                     OpenExplorerCommand.NotifyCanExecuteChanged();
+                    MountCommand.NotifyCanExecuteChanged();
                     return;
                 }
                 else
@@ -419,111 +440,148 @@ public partial class MainViewModel : ObservableObject
     /// </summary>
     private async Task<(int diskIndex, int partition, char driveLetter)?> DetectMountFromSystemAsync()
     {
-        return await Task.Run<(int diskIndex, int partition, char driveLetter)?>(() =>
+        // First check subst mappings
+        try
         {
-            // First check subst mappings
-            try
+            var psi = new ProcessStartInfo
             {
-                var psi = new ProcessStartInfo
+                FileName = "subst",
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var process = Process.Start(psi);
+            if (process != null)
+            {
+                var substTimeoutMs = _config.MountOperations.SubstCommandTimeoutMs;
+                var output = await ReadProcessOutputWithTimeoutAsync(process, substTimeoutMs, "subst");
+
+                // Parse subst output: "Z:\: => UNC\wsl.localhost\Ubuntu-24.04\mnt\wsl\PHYSICALDRIVE1p1"
+                foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
                 {
-                    FileName = "subst",
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                
-                using var process = Process.Start(psi);
-                if (process != null)
-                {
-                    var output = process.StandardOutput.ReadToEnd();
-                    process.WaitForExit(5000);
-                    
-                    // Parse subst output: "Z:\: => UNC\wsl.localhost\Ubuntu-24.04\mnt\wsl\PHYSICALDRIVE1p1"
-                    foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                    var match = Regex.Match(
+                        line,
+                        @"^([A-Z]):\\: => .+PHYSICALDRIVE(\d+)p(\d+)",
+                        RegexOptions.IgnoreCase);
+
+                    if (match.Success)
                     {
-                        var match = Regex.Match(
-                            line, 
-                            @"^([A-Z]):\\: => .+PHYSICALDRIVE(\d+)p(\d+)",
-                            RegexOptions.IgnoreCase);
-                        
-                        if (match.Success)
-                        {
-                            var driveLetter = match.Groups[1].Value[0];
-                            var diskIndex = int.Parse(match.Groups[2].Value);
-                            var partition = int.Parse(match.Groups[3].Value);
-                            
-                            _logger.LogDebug("Found subst mapping: {DriveLetter}: -> Disk {DiskIndex} partition {Partition}",
-                                driveLetter, diskIndex, partition);
-                            
-                            return (diskIndex, partition, driveLetter);
-                        }
+                        var driveLetter = match.Groups[1].Value[0];
+                        var diskIndex = int.Parse(match.Groups[2].Value);
+                        var partition = int.Parse(match.Groups[3].Value);
+
+                        _logger.LogDebug("Found subst mapping: {DriveLetter}: -> Disk {DiskIndex} partition {Partition}",
+                            driveLetter, diskIndex, partition);
+
+                        return (diskIndex, partition, driveLetter);
                     }
                 }
             }
-            catch (Exception ex)
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to check subst mappings");
+        }
+
+        // Also check for WSL-only mounts (no drive letter mapping)
+        try
+        {
+            // Check /mnt/wsl for mounted drives
+            var wslPsi = new ProcessStartInfo
             {
-                _logger.LogWarning(ex, "Failed to check subst mappings");
-            }
-            
-            // Also check for WSL-only mounts (no drive letter mapping)
-            try
+                FileName = "wsl.exe",
+                Arguments = "-e ls /mnt/wsl",
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var wslProcess = Process.Start(wslPsi);
+            if (wslProcess != null)
             {
-                // Check /mnt/wsl for mounted drives
-                var wslPsi = new ProcessStartInfo
+                var wslTimeoutMs = _config.MountOperations.WslCommandTimeoutMs;
+                var wslOutput = await ReadProcessOutputWithTimeoutAsync(wslProcess, wslTimeoutMs, "wsl ls");
+
+                foreach (var entry in wslOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries))
                 {
-                    FileName = "wsl.exe",
-                    Arguments = "-e ls /mnt/wsl",
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                
-                using var wslProcess = Process.Start(wslPsi);
-                if (wslProcess != null)
-                {
-                    var wslOutput = wslProcess.StandardOutput.ReadToEnd();
-                    wslProcess.WaitForExit(5000);
-                    
-                    foreach (var entry in wslOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                    var match = Regex.Match(entry.Trim(), @"PHYSICALDRIVE(\d+)p(\d+)", RegexOptions.IgnoreCase);
+                    if (match.Success)
                     {
-                        var match = Regex.Match(entry.Trim(), @"PHYSICALDRIVE(\d+)p(\d+)", RegexOptions.IgnoreCase);
-                        if (match.Success)
-                        {
-                            var diskIndex = int.Parse(match.Groups[1].Value);
-                            var partition = int.Parse(match.Groups[2].Value);
-                            
-                            _logger.LogDebug("Found WSL mount without drive letter: Disk {DiskIndex} partition {Partition}",
-                                diskIndex, partition);
-                            
-                            // Return with null-char to indicate no drive letter assigned
-                            return (diskIndex, partition, '\0');
-                        }
+                        var diskIndex = int.Parse(match.Groups[1].Value);
+                        var partition = int.Parse(match.Groups[2].Value);
+
+                        _logger.LogDebug("Found WSL mount without drive letter: Disk {DiskIndex} partition {Partition}",
+                            diskIndex, partition);
+
+                        // Return with null-char to indicate no drive letter assigned
+                        return (diskIndex, partition, '\0');
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to check WSL mounts");
-            }
-            
-            return null;
-        });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to check WSL mounts");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Reads process stdout with proper timeout handling.
+    /// </summary>
+    /// <param name="process">The process to read output from.</param>
+    /// <param name="timeoutMs">Timeout in milliseconds.</param>
+    /// <param name="processName">Name for logging purposes.</param>
+    /// <returns>The process output, or empty string if timed out.</returns>
+    private async Task<string> ReadProcessOutputWithTimeoutAsync(Process process, int timeoutMs, string processName)
+    {
+        using var cts = new CancellationTokenSource(timeoutMs);
+        string output;
+
+        try
+        {
+            output = await process.StandardOutput.ReadToEndAsync(cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Timeout during read - kill process and return empty
+            try { process.Kill(); } catch { /* ignore kill errors */ }
+            _logger.LogWarning("{ProcessName} process timed out reading output after {TimeoutMs}ms and was killed", processName, timeoutMs);
+            return string.Empty;
+        }
+
+        // Output read successfully - wait for exit with remaining timeout, but don't discard output if this times out
+        try
+        {
+            await process.WaitForExitAsync(cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Process didn't exit in time, but we have the output - kill and return what we got
+            try { process.Kill(); } catch { /* ignore kill errors */ }
+            _logger.LogDebug("{ProcessName} process exit wait timed out after output was read; returning captured output", processName);
+        }
+
+        return output;
     }
 
     /// <summary>
     /// Loads candidate (non-system, non-boot) disks and available drive letters, populates the corresponding collections, and auto-selects defaults when available.
     /// </summary>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <remarks>
     /// Updates the Disks and FreeDriveLetters collections, may set SelectedDisk and SelectedDriveLetter if they are not already set, and writes progress or error text to StatusMessage.
     /// </remarks>
-    private async Task LoadDisksAndDriveLetters()
+    private async Task LoadDisksAndDriveLetters(CancellationToken cancellationToken = default)
     {
         try
         {
             StatusMessage = "Loading disks and drive letters...";
 
             // Get data on background thread
-            var data = await Task.Run(GetDisksAndDriveLettersData);
+            var data = await Task.Run(GetDisksAndDriveLettersData, cancellationToken);
 
             // Update UI on UI thread
             UpdateUIWithData(data);

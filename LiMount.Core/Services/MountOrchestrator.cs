@@ -31,8 +31,9 @@ public class MountOrchestrator : IMountOrchestrator
         IOptions<LiMountConfiguration> config,
         IMountHistoryService? historyService = null)
     {
-        _scriptExecutor = scriptExecutor ?? throw new ArgumentNullException(nameof(scriptExecutor));
+        ArgumentNullException.ThrowIfNull(scriptExecutor);
         ArgumentNullException.ThrowIfNull(config);
+        _scriptExecutor = scriptExecutor;
         _config = config.Value.MountOperations;
         _historyService = historyService;
 

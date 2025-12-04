@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
@@ -257,6 +258,78 @@ public class MountStateServiceTests : IDisposable
         if (File.Exists(customStateFile))
         {
             File.Delete(customStateFile);
+        }
+    }
+
+    [Fact]
+    public async Task ReconcileMountStateAsync_VerifiesEachPartitionIndependently()
+    {
+        var stateFile = Path.Combine(Path.GetTempPath(), $"limount_reconcile_multi_{Guid.NewGuid()}.json");
+        var accessibleDir = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), $"limount_access_{Guid.NewGuid()}")).FullName;
+        var inaccessibleDir = Path.Combine(Path.GetTempPath(), $"limount_missing_{Guid.NewGuid()}");
+
+        var driveLetterService = new TestDriveLetterService(new[] { 'Z', 'Y' });
+        var service = CreateService(driveLetterService, stateFile);
+
+        var mounts = new List<ActiveMount>
+        {
+            new()
+            {
+                Id = "mount-1",
+                DiskIndex = 42,
+                PartitionNumber = 1,
+                DriveLetter = 'Z',
+                MountPathUNC = accessibleDir
+            },
+            new()
+            {
+                Id = "mount-2",
+                DiskIndex = 42,
+                PartitionNumber = 2,
+                DriveLetter = 'Y',
+                MountPathUNC = inaccessibleDir
+            },
+            new()
+            {
+                Id = "orphan",
+                DiskIndex = 43,
+                PartitionNumber = 1,
+                DriveLetter = 'X'
+            }
+        };
+
+        File.WriteAllText(
+            stateFile,
+            JsonSerializer.Serialize(mounts, new JsonSerializerOptions { WriteIndented = true }));
+
+        try
+        {
+            var orphaned = await service.ReconcileMountStateAsync();
+
+            orphaned.Should().ContainSingle(m => m.Id == "orphan");
+
+            var reconciledMounts = await service.GetActiveMountsAsync();
+
+            reconciledMounts.Should().HaveCount(2);
+
+            var verifiedMap = reconciledMounts.ToDictionary(m => m.Id, m => m.IsVerified);
+
+            verifiedMap["mount-1"].Should().BeTrue();
+            verifiedMap["mount-2"].Should().BeFalse();
+        }
+        finally
+        {
+            service.Dispose();
+
+            if (File.Exists(stateFile))
+            {
+                File.Delete(stateFile);
+            }
+
+            if (Directory.Exists(accessibleDir))
+            {
+                Directory.Delete(accessibleDir, true);
+            }
         }
     }
 

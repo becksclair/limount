@@ -21,7 +21,8 @@ public class UnmountOrchestrator : IUnmountOrchestrator
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="scriptExecutor"/> is null.</exception>
     public UnmountOrchestrator(IScriptExecutor scriptExecutor, IMountHistoryService? historyService = null)
     {
-        _scriptExecutor = scriptExecutor ?? throw new ArgumentNullException(nameof(scriptExecutor));
+        ArgumentNullException.ThrowIfNull(scriptExecutor);
+        _scriptExecutor = scriptExecutor;
         _historyService = historyService;
     }
 

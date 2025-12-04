@@ -1,5 +1,6 @@
-using System.Diagnostics;
 using System.Runtime.Versioning;
+using System.Security;
+using Microsoft.Extensions.Logging;
 using LiMount.Core.Interfaces;
 
 namespace LiMount.Core.Services;
@@ -11,6 +12,17 @@ namespace LiMount.Core.Services;
 [SupportedOSPlatform("windows")]
 public class DriveLetterService : IDriveLetterService
 {
+    private readonly ILogger<DriveLetterService>? _logger;
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="DriveLetterService"/>.
+    /// </summary>
+    /// <param name="logger">Optional logger for diagnostic information.</param>
+    public DriveLetterService(ILogger<DriveLetterService>? logger = null)
+    {
+        _logger = logger;
+    }
+
     /// <summary>
     /// Retrieves the drive letters currently in use on the system via DriveInfo.GetDrives().
     /// Returns letters A-Z in ascending order. Network and subst drives are included if reported by DriveInfo.
@@ -32,9 +44,26 @@ public class DriveLetterService : IDriveLetterService
                 }
             }
         }
-        catch (Exception)
+        catch (SecurityException ex)
         {
-            // If we can't enumerate drives, proceed with what we have
+            // Critical: security exception should be logged and potentially re-thrown
+            _logger?.LogError(ex, "Security exception when enumerating drives - insufficient permissions");
+            throw;
+        }
+        catch (OutOfMemoryException)
+        {
+            // Critical: OOM should not be swallowed
+            throw;
+        }
+        catch (IOException ex)
+        {
+            // I/O error during drive enumeration - log but continue with what we have
+            _logger?.LogWarning(ex, "I/O error when enumerating drives, proceeding with partial results");
+        }
+        catch (Exception ex)
+        {
+            // Other exceptions - log at warning level
+            _logger?.LogWarning(ex, "Failed to enumerate drives, proceeding with partial results");
         }
 
         // Note: On Windows, we could also check for network drives and subst drives

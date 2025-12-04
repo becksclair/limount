@@ -11,8 +11,12 @@
 .PARAMETER DiskIndex
     The physical disk index (0-based, e.g., 2 for \\.\PHYSICALDRIVE2).
 
+.PARAMETER OutputFile
+    Required: GUID-based temp file path where output will be written.
+    This prevents predictable temp file attacks (CWE-377).
+
 .EXAMPLE
-    .\Unmount-LinuxDisk.ps1 -DiskIndex 2
+    .\Unmount-LinuxDisk.ps1 -DiskIndex 2 -OutputFile "C:\Users\...\Temp\limount_unmount_abc123.txt"
 
 .NOTES
     Requires Windows 11 Build 22000+ or Microsoft Store WSL.
@@ -22,7 +26,10 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory=$true)]
-    [int]$DiskIndex
+    [int]$DiskIndex,
+
+    [Parameter(Mandatory=$true)]
+    [string]$OutputFile
 )
 
 # Function to output result and exit
@@ -53,10 +60,9 @@ function Write-Result {
     # Write to stdout
     $output | ForEach-Object { Write-Output $_ }
 
-    # Also write to temp file for elevated scenarios
+    # Write to the GUID-based temp file provided by the caller (prevents predictable temp file attacks)
     try {
-        $tempFile = Join-Path $env:TEMP "limount_unmount_${DiskIndex}.txt"
-        $output | Out-File -FilePath $tempFile -Encoding UTF8 -Force
+        $output | Out-File -FilePath $OutputFile -Encoding UTF8 -Force
     } catch {
         # Ignore errors writing temp file
     }
