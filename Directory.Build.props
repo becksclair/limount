@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <!-- Shared build properties to avoid duplicating toolchain paths -->
+  <PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
+    <WinSdkVersion>10.0.26100.0</WinSdkVersion>
+    <VCToolsVersion>14.44.35207</VCToolsVersion>
+    <WinSdkBase>$(ProgramFiles(x86))\Windows Kits\10</WinSdkBase>
+    <VCToolsBase>$(ProgramFiles(x86))\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\$(VCToolsVersion)</VCToolsBase>
+    <WinSdkUmLib>$(WinSdkBase)\Lib\$(WinSdkVersion)\um\x64</WinSdkUmLib>
+    <WinSdkUcrtLib>$(WinSdkBase)\Lib\$(WinSdkVersion)\ucrt\x64</WinSdkUcrtLib>
+    <VCToolsLib>$(VCToolsBase)\lib\x64</VCToolsLib>
+    <NativeLibSearchPaths>$(WinSdkUmLib);$(WinSdkUcrtLib);$(VCToolsLib)</NativeLibSearchPaths>
+  </PropertyGroup>
+</Project>

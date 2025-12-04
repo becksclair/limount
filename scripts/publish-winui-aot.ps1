@@ -28,16 +28,6 @@ if (-not (Test-Path $dotnet)) {
     exit 1
 }
 
-$sdkLib = "C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64"
-$ucrtLib = "C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64"
-$msvcLib = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\lib\x64"
-
-foreach ($p in @($sdkLib, $ucrtLib, $msvcLib)) {
-    if (-not (Test-Path $p)) { Write-Warning "Path missing: $p" }
-}
-
-$env:LIB = "$sdkLib;$ucrtLib;$msvcLib"
-
 & $dotnet publish `
     "LiMount.WinUI/LiMount.WinUI.csproj" `
     -c $Configuration `

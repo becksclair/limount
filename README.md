@@ -108,23 +108,14 @@ limount/
    ./LiMount.App.exe
    ```
 
-### WinUI 3 NativeAOT Spike (experimental)
+### Publish Matrix
 
-We ship a WinUI 3 spike project (`LiMount.WinUI`) to evaluate NativeAOT.
+| UI stack | Mode        | Command                                                                                                  | Output                                                  |
+|----------|-------------|-----------------------------------------------------------------------------------------------------------|---------------------------------------------------------|
+| WPF      | ReadyToRun  | `.\scripts\publish-wpf-r2r.ps1`                                                                          | `LiMount.App/bin/publish/win-x64/`                     |
+| WinUI 3  | NativeAOT   | `.\scripts\publish-winui-aot.ps1` (requires .NET SDK 8.0.402+, WinSDK/MSVC already installed)            | `LiMount.WinUI/bin/Release/net8.0-windows10.0.22621.0/win-x64/publish/` |
 
-Publish (requires .NET SDK 8.0.402+ and WinSDK/MSVC installed):
-```powershell
-$env:LIB=""  # optional, project supplies linker paths
-C:\Users\Rebecca\.dotnet\8\dotnet publish LiMount.WinUI/LiMount.WinUI.csproj `
-    -c Release -r win-x64 -p:PublishAot=true --self-contained true
-```
-Output: `LiMount.WinUI/bin/Release/net8.0-windows10.0.22621.0/win-x64/publish/`
-
-Shortcut script:
-```powershell
-.\scripts\publish-winui-aot.ps1
-```
-Known warnings: trim/AOT warnings from WebView2 and Serilog; functionally builds.
+Known warnings on WinUI AOT: trim/AOT analysis from Serilog and WebView2 (transitive via WinAppSDK); build still succeeds.
 
 ## Usage
 
