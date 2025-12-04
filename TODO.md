@@ -504,6 +504,36 @@ _Added: 2025-11-25 based on architecture review_
 
 ---
 
+## Milestone 14: NativeAOT & UI Migration (Planned)
+
+### Current State (WPF)
+
+- [ ] Document that WPF NativeAOT remains unsupported as of 2025-12-04 (trimming/XAML issues like NETSDK1168). Keep ReadyToRun single-file publish as the supported path.
+
+### Spike A: WinUI 3 (NativeAOT-ready on Windows App SDK 1.6+)
+
+- [ ] Branch `feature/winui3-aot-spike` with a minimal WinUI 3 shell (net8.0-windows10.0.22621.0).
+- [ ] Port DI + Core services; validate PowerShell/WMI calls still isolate to Core.
+- [ ] Enable `<PublishAot>true</PublishAot>`, CsWinRT 2.1.1+, add trimming roots for reflection-heavy code.
+- [ ] Publish NativeAOT win-x64 build; record startup/size vs WPF R2R.
+- [ ] List WinUI gaps/blockers (controls parity, WindowChrome, WebView2) with mitigation options.
+
+### Spike B: Avalonia (Cross-platform, NativeAOT-capable)
+
+- [ ] Branch `feature/avalonia-aot-spike` using Avalonia 11.2+ template.
+- [ ] Port DI + Core services; swap dialogs/navigation; confirm Windows-only bits stay in Core.
+- [ ] Add trimming roots/linker config for NativeAOT; audit third-party controls for AOT readiness.
+- [ ] Publish NativeAOT win-x64 build; capture perf/size and UX parity notes.
+- [ ] Track Avalonia gaps (DataGrid, Fluent theme resources, reflection hotspots) and mitigation.
+
+### Decision & Milestone Plan
+
+- [ ] Compare Spike A vs Spike B (perf, size, effort, ecosystem risk, control parity).
+- [ ] Pick target UI stack; document recommendation and rollback plan.
+- [ ] Create follow-up migration milestone (UI rewrite, theming, test updates, pipeline changes) once a target is chosen.
+
+---
+
 ## Notes
 
 - **Dependencies**:
