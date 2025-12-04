@@ -532,7 +532,8 @@ _Added: 2025-11-25 based on architecture review_
 - [ ] Pick target UI stack; document recommendation and rollback plan.
 - [ ] Create follow-up migration milestone (UI rewrite, theming, test updates, pipeline changes) once a target is chosen.
 - [x] Spike A initial scaffold: add `LiMount.WinUI` project (WinUI 3 shell) wired to `LiMount.Core` via generic host; build succeeds with .NET SDK 8.0.402.
-- [ ] NativeAOT publish attempt: currently blocked by linker missing `advapi32.lib` even with explicit LIBPATH + CsWinRT AOT flags; likely need VS Dev Prompt/Windows SDK lib path cleanup and Json source-gen to clear trim warnings. Keep using ReadyToRun for now.
+- [x] NativeAOT publish test: succeeds when overriding `LIB` to Windows SDK + MSVC lib paths; outputs to `LiMount.WinUI/bin/Release/.../publish/` (still emits trim/AOT warnings for System.Text.Json/Options binding and WebView2).
+- [ ] Follow-ups for AOT: add Json source-gen for mount state/history, trim roots for options binding, remove invalid `LIB` entries (gtk/gstreamer), and wrap publish in a helper script that sets `LIB` (Win SDK + MSVC).
 
 ---
 
