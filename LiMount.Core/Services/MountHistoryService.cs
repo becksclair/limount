@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
 using LiMount.Core.Configuration;
+using LiMount.Core.Serialization;
 
 namespace LiMount.Core.Services;
 
@@ -212,8 +213,10 @@ public class MountHistoryService : IMountHistoryService, IDisposable
         try
         {
             var json = await File.ReadAllTextAsync(_historyFilePath);
-            var history = JsonSerializer.Deserialize<List<MountHistoryEntry>>(json);
-            return history ?? new List<MountHistoryEntry>();
+            var history = JsonSerializer.Deserialize(
+                json,
+                LiMountJsonContext.Default.ListMountHistoryEntry) ?? new List<MountHistoryEntry>();
+            return history;
         }
         catch (JsonException ex)
         {
@@ -227,12 +230,9 @@ public class MountHistoryService : IMountHistoryService, IDisposable
     /// </summary>
     private async Task SaveHistoryInternalAsync(List<MountHistoryEntry> history)
     {
-        var options = new JsonSerializerOptions
-        {
-            WriteIndented = true
-        };
-
-        var json = JsonSerializer.Serialize(history, options);
+        var json = JsonSerializer.Serialize(
+            history,
+            LiMountJsonContext.Default.ListMountHistoryEntry);
         await File.WriteAllTextAsync(_historyFilePath, json);
     }
 

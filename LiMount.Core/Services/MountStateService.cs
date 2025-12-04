@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using LiMount.Core.Configuration;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
+using LiMount.Core.Serialization;
 
 namespace LiMount.Core.Services;
 
@@ -338,8 +339,10 @@ public class MountStateService : IMountStateService, IDisposable
         try
         {
             var json = await File.ReadAllTextAsync(_stateFilePath);
-            var mounts = JsonSerializer.Deserialize<List<ActiveMount>>(json);
-            return mounts ?? new List<ActiveMount>();
+            var mounts = JsonSerializer.Deserialize(
+                json,
+                LiMountJsonContext.Default.ListActiveMount) ?? new List<ActiveMount>();
+            return mounts;
         }
         catch (JsonException ex)
         {
@@ -365,12 +368,9 @@ public class MountStateService : IMountStateService, IDisposable
     {
         try
         {
-            var options = new JsonSerializerOptions
-            {
-                WriteIndented = true
-            };
-
-            var json = JsonSerializer.Serialize(mounts, options);
+            var json = JsonSerializer.Serialize(
+                mounts,
+                LiMountJsonContext.Default.ListActiveMount);
             await File.WriteAllTextAsync(_stateFilePath, json);
         }
         catch (IOException ex)
