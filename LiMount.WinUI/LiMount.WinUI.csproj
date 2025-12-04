@@ -25,6 +25,10 @@
         <PublishAot>false</PublishAot>
         <PublishReadyToRun>true</PublishReadyToRun>
         <WindowsSdkPackageVersion>10.0.22621.38</WindowsSdkPackageVersion>
+        <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+        <CsWinRTAotOptimizerEnabled>true</CsWinRTAotOptimizerEnabled>
+        <IlcAdditionalLibPaths>$(IlcAdditionalLibPaths);C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\lib\x64</IlcAdditionalLibPaths>
+        <IlcAdditionalLinkerOptions>/LIBPATH:\"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64\" /LIBPATH:\"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\lib\x64\"</IlcAdditionalLinkerOptions>
     </PropertyGroup>
 
     <ItemGroup>
@@ -48,6 +52,7 @@
         <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
         <PackageReference Include="Serilog.Extensions.Hosting" Version="8.0.0" />
         <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+        <PackageReference Include="Microsoft.Windows.CsWinRT" Version="2.1.1" />
 
         <Manifest Include="$(ApplicationManifest)" />
     </ItemGroup>
