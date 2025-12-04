@@ -51,7 +51,6 @@
 
     <ItemGroup>
         <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.240829007" />
-        <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2651.64" />
         <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.22621.3233" />
         <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
         <PackageReference Include="Serilog.Extensions.Hosting" Version="8.0.0" />
@@ -83,7 +82,6 @@
     </ItemGroup>
 
     <ItemGroup Condition="'$(PublishTrimmed)' == 'true' or '$(PublishAot)' == 'true'">
-        <TrimmerRootAssembly Include="Microsoft.Web.WebView2.Core" />
         <TrimmerRootAssembly Include="Serilog" />
     </ItemGroup>
 
