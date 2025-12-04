@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "LiMount.WinUI (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "LiMount.WinUI (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

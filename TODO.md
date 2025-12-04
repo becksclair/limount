@@ -531,6 +531,8 @@ _Added: 2025-11-25 based on architecture review_
 - [ ] Compare Spike A vs Spike B (perf, size, effort, ecosystem risk, control parity).
 - [ ] Pick target UI stack; document recommendation and rollback plan.
 - [ ] Create follow-up migration milestone (UI rewrite, theming, test updates, pipeline changes) once a target is chosen.
+- [x] Spike A initial scaffold: add `LiMount.WinUI` project (WinUI 3 shell) wired to `LiMount.Core` via generic host; build succeeds with .NET SDK 8.0.402.
+- [ ] NativeAOT publish attempt: currently blocked by linker missing `advapi32.lib` (needs VS/WinSDK dev env) and requires enabling CsWinRT AOT settings; keep using ReadyToRun for now.
 
 ---
 
