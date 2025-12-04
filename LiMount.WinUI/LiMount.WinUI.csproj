@@ -27,8 +27,12 @@
         <WindowsSdkPackageVersion>10.0.22621.38</WindowsSdkPackageVersion>
         <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
         <CsWinRTAotOptimizerEnabled>true</CsWinRTAotOptimizerEnabled>
-        <IlcAdditionalLibPaths>$(IlcAdditionalLibPaths);C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\lib\x64</IlcAdditionalLibPaths>
-        <IlcAdditionalLinkerOptions>/LIBPATH:\"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64\" /LIBPATH:\"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\lib\x64\"</IlcAdditionalLinkerOptions>
+        <IlcAdditionalLibraryPaths>$(IlcAdditionalLibraryPaths);C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\lib\x64</IlcAdditionalLibraryPaths>
+        <IlcAdditionalLinkerOptions>/LIBPATH:"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64" /LIBPATH:"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64" /LIBPATH:"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\lib\x64"</IlcAdditionalLinkerOptions>
+        <AdditionalNativeLibraryDirectories>$(AdditionalNativeLibraryDirectories);C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\lib\x64</AdditionalNativeLibraryDirectories>
+        <VCToolsInstallDir>C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\</VCToolsInstallDir>
+        <WindowsSdkDir>C:\Program Files (x86)\Windows Kits\10\</WindowsSdkDir>
+        <WindowsSdkVersion>10.0.26100.0\</WindowsSdkVersion>
     </PropertyGroup>
 
     <ItemGroup>
@@ -55,6 +59,27 @@
         <PackageReference Include="Microsoft.Windows.CsWinRT" Version="2.1.1" />
 
         <Manifest Include="$(ApplicationManifest)" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(PublishAot)' == 'true'">
+        <SdkNativeLibrary Include="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64\advapi32.lib" />
+        <SdkNativeLibrary Include="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64\bcrypt.lib" />
+        <SdkNativeLibrary Include="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64\crypt32.lib" />
+        <SdkNativeLibrary Include="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64\iphlpapi.lib" />
+        <SdkNativeLibrary Include="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64\kernel32.lib" />
+        <SdkNativeLibrary Include="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64\mswsock.lib" />
+        <SdkNativeLibrary Include="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64\ncrypt.lib" />
+        <SdkNativeLibrary Include="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64\normaliz.lib" />
+        <SdkNativeLibrary Include="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64\ntdll.lib" />
+        <SdkNativeLibrary Include="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64\ole32.lib" />
+        <SdkNativeLibrary Include="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64\oleaut32.lib" />
+        <SdkNativeLibrary Include="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64\secur32.lib" />
+        <SdkNativeLibrary Include="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64\user32.lib" />
+        <SdkNativeLibrary Include="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64\version.lib" />
+        <SdkNativeLibrary Include="C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64\ws2_32.lib" />
+        <LinkerArg Include="/LIBPATH:&quot;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64&quot;" />
+        <LinkerArg Include="/LIBPATH:&quot;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64&quot;" />
+        <LinkerArg Include="/LIBPATH:&quot;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\lib\x64&quot;" />
     </ItemGroup>
 
     <ItemGroup>
