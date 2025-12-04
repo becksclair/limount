@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Serilog;
+using System.Diagnostics.CodeAnalysis;
 
 namespace LiMount.WinUI;
 
@@ -38,7 +39,11 @@ public partial class App : Application
             })
             .ConfigureServices((context, services) =>
             {
+#pragma warning disable IL2026 // Trimming
+#pragma warning disable IL3050 // AOT
                 services.Configure<LiMountConfiguration>(context.Configuration.GetSection(LiMountConfiguration.SectionName));
+#pragma warning restore IL3050
+#pragma warning restore IL2026
 
                 // Core services
                 services.AddSingleton<IDiskEnumerationService, DiskEnumerationService>();
