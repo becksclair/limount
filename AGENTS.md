@@ -1,97 +1,184 @@
-# AGENTS.md - LiMount AI Agent Guide
+# AGENTS.md - LiMount
 
-## Project Overview
+## What
 
-**LiMount**: Windows WPF app (.NET 8) that mounts Linux partitions into WSL2 and maps them as Windows drives.
-- **Tech**: .NET 8, WPF, CommunityToolkit.Mvvm, WMI, Serilog
-- **Structure**: `LiMount.Core` (services, orchestrators), `LiMount.App` (WPF UI), `scripts/` (PowerShell)
+LiMount mounts Linux partitions into WSL2 and maps them as Windows drive letters.
+
+## Structure
+
+- **LiMount.Core** - Shared business logic (services, orchestrators, models)
+- **LiMount.App** - WPF UI (.NET 8, production-ready)
+- **LiMount.WinUI** - WinUI 3 UI (.NET 10, Windows 11, future replacement)
+- **LiMount.Tests** - Unit and integration tests
+- **scripts/** - PowerShell scripts for mount/unmount operations
 
 ## Build & Test
 
 ```bash
-dotnet restore && dotnet build
-dotnet run --project LiMount.App
+dotnet build
 dotnet test LiMount.Tests
+dotnet run --project LiMount.App      # WPF (stable)
+dotnet run --project LiMount.WinUI    # WinUI 3 (Win11 only)
 ```
 
-## 🎯 Core Directives
+## Key Patterns
 
-### Ultrathink Process
+- Services injected via DI (interfaces in `LiMount.Core/Interfaces/`)
+- Config via `IOptions<LiMountConfiguration>` from `appsettings.json`
+- Mount state tracked by `IMountStateService` (singleton)
+- Orchestrators coordinate workflows and validation
+- Result objects (`MountAndMapResult`, `UnmountAndUnmapResult`) for outcomes
 
-1. **Analyze**: Understand intent, check architecture fit
-2. **Design**: Define interfaces, config, state persistence *before* coding
-3. **TDD**: Failing tests → Minimal implementation → Refactor
-4. **Implement**: Minimal code to pass tests
-5. **Commit**: Small, atomic commits (feat/fix/refactor)
+## Logs
 
-### Architecture Rules
+`%LocalAppData%\LiMount\logs\`
 
-- **DI**: Always inject interfaces. Never `new` for services
-  - Services/State: Singleton | Orchestrators/ViewModels: Transient
-- **Config**: All tunables in `appsettings.json` via `IOptions<LiMountConfiguration>`
-- **State**: Use `IMountStateService` (Singleton) for active mounts
-- **Validation**: Centrally in Orchestrators, return `Result` objects
-- **Async**: `async/await` for all I/O
+## Detailed Docs
 
-## ❌ Strict Prohibitions
+For specialized topics, see `agent_docs/`:
+- `winui-specifics.md` - WinUI 3 vs WPF differences
+- `aot-trimming.md` - AOT/trimming constraints
 
-- **Hardcoding**: No timeouts/retries—use `IOptions<LiMountConfiguration>`
-- **`new` Services**: Always use DI (constructor injection)
-- **Logic in ViewModels**: Move to Services/Orchestrators
-- **Direct `MessageBox`**: Use `IDialogService`
-- **ViewModel State**: Use `IMountStateService` for persistence
-- **Swallowing Exceptions**: Always log with context
-- **Scattered Validation**: Validate *once* in Orchestrator
+---
 
-## 🧪 TDD Methodology
+## Issue Tracking with bd (beads)
 
-- **Cycle**: Red → Green → Refactor
-- **Order**: Happy path → Validation → Edge cases → Errors
-- **Mocking**: Mock all deps (`IScriptExecutor`, `IMountStateService`, etc.)
-- **Linux Dev**: Mock Windows APIs, document integration tests
+**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
 
-## 🛠️ Workflow
+### Why bd?
 
-1. **Explore**: Grep/Glob for similar patterns
-2. **Design**: Interface → Config → Model
-3. **Test (Red)**: Write failing tests
-4. **Implement (Green)**: Create service, pass tests
-5. **Refactor**: Register in `App.xaml.cs`, add XML docs
-6. **Integrate**: Connect to UI/ViewModels
-7. **Commit**: Atomic commits
+- Dependency-aware: Track blockers and relationships between issues
+- Git-friendly: Auto-syncs to JSONL for version control
+- Agent-optimized: JSON output, ready work detection, discovered-from links
+- Prevents duplicate tracking systems and confusion
 
-## Key Services
+### Quick Start
 
-| Service | Purpose | Lifetime |
-|---------|---------|----------|
-| `IMountStateService` | Track active mounts (persisted) | Singleton |
-| `IDiskEnumerationService` | Find disks (WMI) | Singleton |
-| `IScriptExecutor` | Run PowerShell scripts | Singleton |
-| `IMountOrchestrator` | Mount workflow & validation | Transient |
-| `IDialogService` | Show UI dialogs | Singleton |
+**Check for ready work:**
+```bash
+bd ready --json
+```
 
-## PowerShell Execution
+**Create new issues:**
+```bash
+bd create "Issue title" -t bug|feature|task -p 0-4 --json
+bd create "Issue title" -p 1 --deps discovered-from:bd-123 --json
+bd create "Subtask" --parent <epic-id> --json  # Hierarchical subtask (gets ID like epic-id.1)
+```
 
-- **Elevated**: Mount/Unmount via `runas`, output to temp files
-- **Non-Elevated**: Map/Unmap, captures stdout directly
-- **Output Format**: `key=value`
+**Claim and update:**
+```bash
+bd update bd-42 --status in_progress --json
+bd update bd-42 --priority 1 --json
+```
 
-## ⚠️ Common Mistakes
+**Complete work:**
+```bash
+bd close bd-42 --reason "Completed" --json
+```
 
-- **Test-Last**: Writing code before tests
-- **Hardcoded Config**: Using `const` instead of `appsettings.json`
-- **Transient State**: Storing state in ViewModels
-- **Silent Failures**: Empty catch blocks
-- **Massive Commits**: Batching unrelated changes
+### Issue Types
 
-## 📚 Reference Patterns
+- `bug` - Something broken
+- `feature` - New functionality
+- `task` - Work item (tests, docs, refactoring)
+- `epic` - Large feature with subtasks
+- `chore` - Maintenance (dependencies, tooling)
 
-- **Service**: Interface + Implementation + DI Registration + Config Injection
-- **Result Object**: `Result` or `MountAndMapResult` (Success/Failure/Error)
-- **Config**: Add to `LiMountConfiguration`, update `appsettings.json`, inject `IOptions<>`
+### Priorities
 
-## Troubleshooting
+- `0` - Critical (security, data loss, broken builds)
+- `1` - High (major features, important bugs)
+- `2` - Medium (default, nice-to-have)
+- `3` - Low (polish, optimization)
+- `4` - Backlog (future ideas)
 
-- **Logs**: `%LocalAppData%\LiMount\logs\`
-- **Mount Fails**: Check `ScriptExecution.TempFilePollingTimeoutSeconds`
-- **State Lost**: Ensure `IMountStateService` is used, not ViewModel properties
+### Workflow for AI Agents
+
+1. **Check ready work**: `bd ready` shows unblocked issues
+2. **Claim your task**: `bd update <id> --status in_progress`
+3. **Work on it**: Implement, test, document
+4. **Discover new work?** Create linked issue:
+   - `bd create "Found bug" -p 1 --deps discovered-from:<parent-id>`
+5. **Complete**: `bd close <id> --reason "Done"`
+6. **Commit together**: Always commit the `.beads/issues.jsonl` file together with the code changes so issue state stays in sync with code state
+
+### Auto-Sync
+
+bd automatically syncs with git:
+- Exports to `.beads/issues.jsonl` after changes (5s debounce)
+- Imports from JSONL when newer (e.g., after `git pull`)
+- No manual export/import needed!
+
+### GitHub Copilot Integration
+
+If using GitHub Copilot, also create `.github/copilot-instructions.md` for automatic instruction loading.
+Run `bd onboard` to get the content, or see step 2 of the onboard instructions.
+
+### MCP Server (Recommended)
+
+If using Claude or MCP-compatible clients, install the beads MCP server:
+
+```bash
+pip install beads-mcp
+```
+
+Add to MCP config (e.g., `~/.config/claude/config.json`):
+```json
+{
+  "beads": {
+    "command": "beads-mcp",
+    "args": []
+  }
+}
+```
+
+Then use `mcp__beads__*` functions instead of CLI commands.
+
+### Managing AI-Generated Planning Documents
+
+AI assistants often create planning and design documents during development:
+- PLAN.md, IMPLEMENTATION.md, ARCHITECTURE.md
+- DESIGN.md, CODEBASE_SUMMARY.md, INTEGRATION_PLAN.md
+- TESTING_GUIDE.md, TECHNICAL_DESIGN.md, and similar files
+
+**Best Practice: Use a dedicated directory for these ephemeral files**
+
+**Recommended approach:**
+- Create a `history/` directory in the project root
+- Store ALL AI-generated planning/design docs in `history/`
+- Keep the repository root clean and focused on permanent project files
+- Only access `history/` when explicitly asked to review past planning
+
+**Example .gitignore entry (optional):**
+```
+# AI planning documents (ephemeral)
+history/
+```
+
+**Benefits:**
+- ✅ Clean repository root
+- ✅ Clear separation between ephemeral and permanent documentation
+- ✅ Easy to exclude from version control if desired
+- ✅ Preserves planning history for archeological research
+- ✅ Reduces noise when browsing the project
+
+### CLI Help
+
+Run `bd <command> --help` to see all available flags for any command.
+For example: `bd create --help` shows `--parent`, `--deps`, `--assignee`, etc.
+
+### Important Rules
+
+- ✅ Use bd for ALL task tracking
+- ✅ Always use `--json` flag for programmatic use
+- ✅ Link discovered work with `discovered-from` dependencies
+- ✅ Check `bd ready` before asking "what should I work on?"
+- ✅ Store AI planning docs in `history/` directory
+- ✅ Run `bd <cmd> --help` to discover available flags
+- ❌ Do NOT create markdown TODO lists
+- ❌ Do NOT use external issue trackers
+- ❌ Do NOT duplicate tracking systems
+- ❌ Do NOT clutter repo root with planning documents
+
+For more details, see README.md and QUICKSTART.md.

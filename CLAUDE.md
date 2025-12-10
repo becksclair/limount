@@ -1,3 +1,6 @@
 # CLAUDE.md
 
-See [AGENTS.md](AGENTS.md) for project guidelines and instructions.
+**Note**: This project uses [bd (beads)](https://github.com/steveyegge/beads)
+for issue tracking. Use `bd` commands instead of markdown TODOs.
+
+See AGENTS.md for project instructions and workflow details.
