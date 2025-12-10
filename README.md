@@ -24,7 +24,7 @@
 
 ### Development Requirements
 
-- **.NET 8 SDK**: [Download .NET 8](https://dotnet.microsoft.com/download/dotnet/8.0)
+- **.NET SDK 10.0.101+**: `global.json` pins to 10.0.101 with `rollForward: latestPatch` (builds both the .NET 8 WPF app and the .NET 10 WinUI app)
 - **Visual Studio 2022** or **Visual Studio Code** (optional, for development)
 
 ## Project Structure

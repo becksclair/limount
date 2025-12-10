@@ -15,14 +15,14 @@ namespace LiMount.Tests.Integration;
 /// - A physical Linux-formatted drive connected to the system
 /// - Administrator privileges
 /// - WSL2 installed and configured
-/// 
+///
 /// Set LIMOUNT_TEST_DISK_INDEX environment variable to specify the disk to test.
 /// Tests are skipped if no test disk is configured or prerequisites are not met.
 /// </summary>
 [Collection("IntegrationTests")]
 public class MountIntegrationTests : IAsyncLifetime
 {
-    private readonly IScriptExecutor _scriptExecutor;
+    private readonly ScriptExecutor _scriptExecutor;
     private readonly IDiskEnumerationService _diskService;
     private readonly IMountOrchestrator _mountOrchestrator;
     private readonly IUnmountOrchestrator _unmountOrchestrator;
@@ -36,6 +36,7 @@ public class MountIntegrationTests : IAsyncLifetime
         var loggerFactory = NullLoggerFactory.Instance;
         var config = Options.Create(new LiMountConfiguration());
 
+        // ScriptExecutor implements IMountScriptService, IDriveMappingService, and IFilesystemDetectionService
         _scriptExecutor = new ScriptExecutor(
             config,
             null,
@@ -49,12 +50,14 @@ public class MountIntegrationTests : IAsyncLifetime
             config);
 
         _mountOrchestrator = new MountOrchestrator(
-            _scriptExecutor,
+            _scriptExecutor, // IMountScriptService
+            _scriptExecutor, // IDriveMappingService
             config,
             _historyService);
 
         _unmountOrchestrator = new UnmountOrchestrator(
-            _scriptExecutor,
+            _scriptExecutor, // IMountScriptService
+            _scriptExecutor, // IDriveMappingService
             _historyService);
 
         // Get test disk from environment variable or auto-detect

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
-        <TargetFramework>net8.0-windows10.0.22621.0</TargetFramework>
-        <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+        <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+        <TargetPlatformMinVersion>10.0.26100.0</TargetPlatformMinVersion>
         <OutputType>WinExe</OutputType>
 
         <!-- WinUI 3 -->
@@ -18,15 +18,18 @@
 
         <!-- App Options -->
         <UseRidGraph>true</UseRidGraph>
+        <!-- Default to x64 when Platform isn't specified so WindowsAppSDKSelfContained gets a valid architecture -->
+        <Platform Condition="'$(Platform)'=='' or '$(Platform)'=='AnyCPU' or '$(Platform)'=='Any CPU'">x64</Platform>
         <Platforms>x86;x64;ARM64</Platforms>
         <ApplicationManifest>app.manifest</ApplicationManifest>
         <PublishProfile>win-$(Platform).pubxml</PublishProfile>
         <RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
         <PublishAot>false</PublishAot>
         <PublishReadyToRun>true</PublishReadyToRun>
-        <WindowsSdkPackageVersion>10.0.22621.38</WindowsSdkPackageVersion>
+        <WindowsSdkPackageVersion>10.0.26100.81</WindowsSdkPackageVersion>
         <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
-        <CsWinRTAotOptimizerEnabled>true</CsWinRTAotOptimizerEnabled>
+        <!-- Use managed XAML compiler for .NET 10 compatibility -->
+        <UseXamlCompilerExecutable>false</UseXamlCompilerExecutable>
         <IlcAdditionalLibraryPaths>$(IlcAdditionalLibraryPaths);$(NativeLibSearchPaths)</IlcAdditionalLibraryPaths>
         <IlcAdditionalLinkerOptions>/LIBPATH:"$(WinSdkUmLib)" /LIBPATH:"$(WinSdkUcrtLib)" /LIBPATH:"$(VCToolsLib)"</IlcAdditionalLinkerOptions>
         <AdditionalNativeLibraryDirectories>$(AdditionalNativeLibraryDirectories);$(NativeLibSearchPaths)</AdditionalNativeLibraryDirectories>
@@ -47,12 +50,22 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.240829007" />
-        <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.22621.3233" />
-        <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
+        <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.251106002" />
+        <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4654" />
+
+        <!-- MVVM + UI toolkit -->
+        <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+        <PackageReference Include="CommunityToolkit.WinUI.UI.Controls" Version="7.1.2" />
+
+        <!-- Hosting / logging -->
+        <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
         <PackageReference Include="Serilog.Extensions.Hosting" Version="8.0.0" />
         <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+        <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
         <PackageReference Include="Microsoft.Windows.CsWinRT" Version="2.1.1" />
+
+        <!-- Required by managed XAML compiler in .NET Core runtime - must match version 6.0.0.0 expected by task -->
+        <PackageReference Include="System.Security.Permissions" Version="6.0.0" />
 
         <Manifest Include="$(ApplicationManifest)" />
     </ItemGroup>
@@ -84,6 +97,13 @@
 
     <ItemGroup>
         <ProjectReference Include="..\\LiMount.Core\\LiMount.Core.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Copy PowerShell scripts to output for runtime orchestration -->
+        <None Include="..\\scripts\\**\\*.ps1" LinkBase="scripts">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
     </ItemGroup>
 
     <ItemGroup>

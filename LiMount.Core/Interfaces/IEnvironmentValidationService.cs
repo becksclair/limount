@@ -10,24 +10,27 @@ public interface IEnvironmentValidationService
     /// <summary>
     /// Validates the current environment to ensure all prerequisites are met.
     /// </summary>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>
     /// A validation result indicating whether the environment is valid, along with
     /// detailed information about what checks passed or failed and actionable suggestions
     /// for fixing any issues.
     /// </returns>
-    Task<EnvironmentValidationResult> ValidateEnvironmentAsync();
+    Task<EnvironmentValidationResult> ValidateEnvironmentAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Checks if WSL is installed and available on the system.
     /// </summary>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>True if WSL is available, false otherwise.</returns>
-    Task<bool> IsWslInstalledAsync();
+    Task<bool> IsWslInstalledAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets the list of installed WSL distributions.
     /// </summary>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>A list of distribution names, or an empty list if none are found.</returns>
-    Task<List<string>> GetInstalledDistrosAsync();
+    Task<List<string>> GetInstalledDistrosAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Checks if the Windows version is compatible with LiMount.

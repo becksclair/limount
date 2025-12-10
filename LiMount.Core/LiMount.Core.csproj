@@ -18,6 +18,9 @@
     <!-- Microsoft.Extensions for configuration and logging support -->
     <PackageReference Include="Microsoft.Extensions.Options" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
+
+    <!-- CommunityToolkit.Mvvm for ObservableObject, ObservableProperty, RelayCommand source generators -->
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
   </ItemGroup>
 
 </Project>

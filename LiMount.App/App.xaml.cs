@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
 using LiMount.App.ViewModels;
 using LiMount.App.Services;
+using LiMount.Core.Abstractions;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Services;
 using LiMount.Core.Configuration;
@@ -107,10 +108,18 @@ public partial class App : Application
         // Register Core services
         services.AddSingleton<IDiskEnumerationService, DiskEnumerationService>();
         services.AddSingleton<IDriveLetterService, DriveLetterService>();
-        services.AddSingleton<IScriptExecutor, ScriptExecutor>();
         services.AddSingleton<IMountHistoryService, MountHistoryService>();
         services.AddSingleton<IMountStateService, MountStateService>();
         services.AddSingleton<IEnvironmentValidationService, EnvironmentValidationService>();
+
+        // Register ScriptExecutor with all focused interfaces
+        services.AddSingleton<ScriptExecutor>();
+        services.AddSingleton<IMountScriptService>(sp => sp.GetRequiredService<ScriptExecutor>());
+        services.AddSingleton<IDriveMappingService>(sp => sp.GetRequiredService<ScriptExecutor>());
+        services.AddSingleton<IFilesystemDetectionService>(sp => sp.GetRequiredService<ScriptExecutor>());
+#pragma warning disable CS0618 // IScriptExecutor is obsolete - kept for backward compatibility
+        services.AddSingleton<IScriptExecutor>(sp => sp.GetRequiredService<ScriptExecutor>());
+#pragma warning restore CS0618
 
         // Register App services
         services.AddSingleton<IDialogService, DialogService>();

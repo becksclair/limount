@@ -13,8 +13,17 @@ namespace LiMount.Core.Services;
 /// Executes PowerShell scripts for mounting/unmounting operations.
 /// Uses ProcessStartInfo with elevation where needed.
 /// </summary>
+/// <remarks>
+/// Implements focused interfaces for single responsibility:
+/// <see cref="IMountScriptService"/> for mount/unmount operations,
+/// <see cref="IDriveMappingService"/> for drive letter mapping,
+/// <see cref="IFilesystemDetectionService"/> for filesystem detection.
+/// Also implements deprecated <see cref="IScriptExecutor"/> for backward compatibility.
+/// </remarks>
 [SupportedOSPlatform("windows")]
-public class ScriptExecutor : IScriptExecutor
+#pragma warning disable CS0618 // IScriptExecutor is obsolete - intentionally implementing for backward compatibility
+public class ScriptExecutor : IMountScriptService, IDriveMappingService, IFilesystemDetectionService, IScriptExecutor
+#pragma warning restore CS0618
 {
     // Compiled regex patterns for efficient parsing of lsblk output
     private static readonly Regex NameRegex = new(@"NAME=""([^""]+)""", RegexOptions.Compiled);
@@ -48,12 +57,14 @@ public class ScriptExecutor : IScriptExecutor
     /// <param name="partition">Partition number on the disk to mount.</param>
     /// <param name="fsType">Filesystem type to mount (for example, "ext4").</param>
     /// <param name="distroName">Optional WSL distribution name to associate with the mount.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>A MountResult describing the outcome; `Success` is `true` when the disk was mounted, `false` otherwise. `ErrorMessage` contains details on failure.</returns>
     public async Task<MountResult> ExecuteMountScriptAsync(
         int diskIndex,
         int partition,
         string fsType,
-        string? distroName = null)
+        string? distroName = null,
+        CancellationToken cancellationToken = default)
     {
         if (diskIndex < 0)
         {
@@ -108,7 +119,7 @@ public class ScriptExecutor : IScriptExecutor
             arguments += $" -DistroName \"{distroName}\"";
         }
 
-        var output = await ExecuteElevatedScriptAsync("powershell.exe", arguments, tempOutputFile);
+        var output = await ExecuteElevatedScriptAsync("powershell.exe", arguments, tempOutputFile, cancellationToken);
         var parsedValues = KeyValueOutputParser.Parse(output);
         return MountResult.FromDictionary(parsedValues);
     }
@@ -118,8 +129,9 @@ public class ScriptExecutor : IScriptExecutor
     /// </summary>
     /// <param name="driveLetter">The drive letter to assign (for example, 'Z').</param>
     /// <param name="targetUNC">The UNC path of the WSL share to map (for example, \\wsl$\distro\share).</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>A MappingResult containing whether the mapping succeeded, any error message, and the script's raw output and error.</returns>
-    public async Task<MappingResult> ExecuteMappingScriptAsync(char driveLetter, string targetUNC)
+    public async Task<MappingResult> ExecuteMappingScriptAsync(char driveLetter, string targetUNC, CancellationToken cancellationToken = default)
     {
         if (!char.IsLetter(driveLetter))
         {
@@ -152,7 +164,7 @@ public class ScriptExecutor : IScriptExecutor
         var arguments = $"-ExecutionPolicy Bypass -File \"{scriptPath}\" " +
                        $"-DriveLetter {driveLetter} -TargetUNC \"{targetUNC}\"";
 
-        var (output, error) = await ExecuteNonElevatedScriptAsync("powershell.exe", arguments);
+        var (output, error) = await ExecuteNonElevatedScriptAsync("powershell.exe", arguments, cancellationToken);
         var parsedValues = KeyValueOutputParser.Parse(output);
         var result = MappingResult.FromDictionary(parsedValues);
 
@@ -175,8 +187,9 @@ public class ScriptExecutor : IScriptExecutor
     /// Unmounts the Linux disk identified by the given disk index by invoking the Unmount-LinuxDisk.ps1 script.
     /// </summary>
     /// <param name="diskIndex">The disk index to unmount.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>An <see cref="UnmountResult"/> containing whether the operation succeeded and any error information.</returns>
-    public async Task<UnmountResult> ExecuteUnmountScriptAsync(int diskIndex)
+    public async Task<UnmountResult> ExecuteUnmountScriptAsync(int diskIndex, CancellationToken cancellationToken = default)
     {
         if (diskIndex < 0)
         {
@@ -205,7 +218,7 @@ public class ScriptExecutor : IScriptExecutor
         var arguments = $"-ExecutionPolicy Bypass -File \"{scriptPath}\" -DiskIndex {diskIndex} " +
                        $"-OutputFile \"{tempOutputFile}\"";
 
-        var output = await ExecuteElevatedScriptAsync("powershell.exe", arguments, tempOutputFile);
+        var output = await ExecuteElevatedScriptAsync("powershell.exe", arguments, tempOutputFile, cancellationToken);
         var parsedValues = KeyValueOutputParser.Parse(output);
         return UnmountResult.FromDictionary(parsedValues);
     }
@@ -213,10 +226,12 @@ public class ScriptExecutor : IScriptExecutor
     /// <summary>
     /// Invokes the Unmap-DriveLetter PowerShell script to unmap the specified drive letter and returns the operation result.
     /// </summary>
+    /// <param name="driveLetter">Drive letter to unmap (e.g., 'Z').</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>
     /// An <see cref="UnmappingResult"/> representing the outcome; when the script is missing or the script output indicates failure, `Success` will be `false` and `ErrorMessage` will contain details.
     /// </returns>
-    public async Task<UnmappingResult> ExecuteUnmappingScriptAsync(char driveLetter)
+    public async Task<UnmappingResult> ExecuteUnmappingScriptAsync(char driveLetter, CancellationToken cancellationToken = default)
     {
         if (!char.IsLetter(driveLetter))
         {
@@ -239,7 +254,7 @@ public class ScriptExecutor : IScriptExecutor
 
         var arguments = $"-ExecutionPolicy Bypass -File \"{scriptPath}\" -DriveLetter {driveLetter}";
 
-        var (output, error) = await ExecuteNonElevatedScriptAsync("powershell.exe", arguments);
+        var (output, error) = await ExecuteNonElevatedScriptAsync("powershell.exe", arguments, cancellationToken);
         var parsedValues = KeyValueOutputParser.Parse(output);
         var result = UnmappingResult.FromDictionary(parsedValues);
 
@@ -264,11 +279,13 @@ public class ScriptExecutor : IScriptExecutor
     /// <param name="fileName">The executable to run (e.g., "powershell.exe").</param>
     /// <param name="arguments">The arguments to pass to the executable.</param>
     /// <param name="tempOutputFile">The GUID-based temp file path where the script will write output.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>The contents of the temporary output file when successful; otherwise a string beginning with "STATUS=ERROR" and an error message.</returns>
     private async Task<string> ExecuteElevatedScriptAsync(
         string fileName,
         string arguments,
-        string tempOutputFile)
+        string tempOutputFile,
+        CancellationToken cancellationToken = default)
     {
         // SECURITY AUDIT: Log all elevated operation requests for audit trail
         var correlationId = Path.GetFileNameWithoutExtension(tempOutputFile);
@@ -294,7 +311,7 @@ public class ScriptExecutor : IScriptExecutor
                 return "STATUS=ERROR\nErrorMessage=Failed to start PowerShell process";
             }
 
-            await process.WaitForExitAsync();
+            await process.WaitForExitAsync(cancellationToken);
 
             // Wait for the GUID-based temp file to be written by the script
             var normalizedTimeoutSeconds = Math.Max(0, Math.Min(_config.TempFilePollingTimeoutSeconds, 300));
@@ -306,12 +323,14 @@ public class ScriptExecutor : IScriptExecutor
 
             while (totalWaitTime < timeout)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 if (File.Exists(tempOutputFile))
                 {
                     break;
                 }
 
-                await Task.Delay(pollingInterval);
+                await Task.Delay(pollingInterval, cancellationToken);
                 totalWaitTime += pollingInterval;
             }
 
@@ -319,7 +338,7 @@ public class ScriptExecutor : IScriptExecutor
             {
                 try
                 {
-                    var output = await File.ReadAllTextAsync(tempOutputFile);
+                    var output = await File.ReadAllTextAsync(tempOutputFile, cancellationToken);
                     try
                     {
                         File.Delete(tempOutputFile);
@@ -362,11 +381,12 @@ public class ScriptExecutor : IScriptExecutor
     /// </summary>
     /// <param name="fileName">The executable to run (for example, "powershell.exe").</param>
     /// <param name="arguments">The complete argument string to pass to the process.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>
     /// A tuple where `output` is the process's standard output and `error` is the process's standard error.
     /// If the process fails to start or an exception occurs, `output` contains an error status message and `error` is an empty string.
     /// </returns>
-    private async Task<(string output, string error)> ExecuteNonElevatedScriptAsync(string fileName, string arguments)
+    private async Task<(string output, string error)> ExecuteNonElevatedScriptAsync(string fileName, string arguments, CancellationToken cancellationToken = default)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -386,9 +406,9 @@ public class ScriptExecutor : IScriptExecutor
                 return ("STATUS=ERROR\nErrorMessage=Failed to start PowerShell process", string.Empty);
             }
 
-            var outputTask = process.StandardOutput.ReadToEndAsync();
-            var errorTask = process.StandardError.ReadToEndAsync();
-            var exitTask = process.WaitForExitAsync();
+            var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            var exitTask = process.WaitForExitAsync(cancellationToken);
 
             await Task.WhenAll(outputTask, errorTask, exitTask);
 
@@ -444,7 +464,7 @@ public class ScriptExecutor : IScriptExecutor
     }
 
     /// <inheritdoc/>
-    public async Task<string?> DetectFilesystemTypeAsync(int diskIndex, int partitionNumber)
+    public async Task<string?> DetectFilesystemTypeAsync(int diskIndex, int partitionNumber, CancellationToken cancellationToken = default)
     {
         var diskPath = $@"\\.\PHYSICALDRIVE{diskIndex}";
         _logger?.LogInformation("Detecting filesystem type for disk {DiskIndex} partition {Partition}", diskIndex, partitionNumber);
@@ -452,61 +472,73 @@ public class ScriptExecutor : IScriptExecutor
         try
         {
             // First, check if disk is already mounted by looking for its mount path
-            var alreadyMounted = await IsDiskAlreadyMountedAsync(diskIndex, partitionNumber);
-            
+            var alreadyMounted = await IsDiskAlreadyMountedAsync(diskIndex, partitionNumber, cancellationToken);
+
             if (alreadyMounted)
             {
                 // Disk is already mounted - just run lsblk directly
                 _logger?.LogInformation("Disk {DiskIndex} is already mounted, reading filesystem type directly", diskIndex);
-                var lsblkResult = await RunWslCommandAsync("lsblk -f -o NAME,FSTYPE -P");
-                if (lsblkResult.Success && !string.IsNullOrEmpty(lsblkResult.Output))
+                var (success, output, _) = await RunWslCommandAsync("lsblk -f -o NAME,FSTYPE -P", cancellationToken);
+                if (success && !string.IsNullOrEmpty(output))
                 {
-                    var fsType = ParseLsblkOutput(lsblkResult.Output, partitionNumber);
+                    var fsType = ParseLsblkOutput(output, partitionNumber);
                     _logger?.LogInformation("Detected filesystem type: {FsType}", fsType ?? "unknown");
                     return fsType;
                 }
                 return null;
             }
-            
+
             // Step 1: Attach disk with --bare (requires elevation)
-            var attachResult = await RunElevatedWslCommandAsync($"--mount {diskPath} --bare");
-            if (!attachResult.Success)
+            var (attachSuccess, attachOutput, attachError) = await RunElevatedWslCommandAsync($"--mount {diskPath} --bare", cancellationToken);
+            if (!attachSuccess)
             {
                 // Check if already mounted error
-                if (attachResult.Error?.Contains("already mounted", StringComparison.OrdinalIgnoreCase) == true)
+                if (attachError?.Contains("already mounted", StringComparison.OrdinalIgnoreCase) == true)
                 {
                     _logger?.LogInformation("Disk already mounted, trying lsblk directly");
-                    var lsblkResult = await RunWslCommandAsync("lsblk -f -o NAME,FSTYPE -P");
-                    if (lsblkResult.Success && !string.IsNullOrEmpty(lsblkResult.Output))
+                    var (success, output, error) = await RunWslCommandAsync("lsblk -f -o NAME,FSTYPE -P", cancellationToken);
+                    if (success && !string.IsNullOrEmpty(output))
                     {
-                        return ParseLsblkOutput(lsblkResult.Output, partitionNumber);
+                        return ParseLsblkOutput(output, partitionNumber);
                     }
                 }
-                _logger?.LogWarning("Failed to attach disk for filesystem detection: {Error}", attachResult.Error);
+                _logger?.LogWarning("Failed to attach disk for filesystem detection: {Error}", attachError);
                 return null;
             }
 
             try
             {
                 // Step 2: Run lsblk to detect filesystem (no elevation needed)
-                var lsblkResult = await RunWslCommandAsync("lsblk -f -o NAME,FSTYPE -P");
-                if (!lsblkResult.Success || string.IsNullOrEmpty(lsblkResult.Output))
+                var (success, output, error) = await RunWslCommandAsync("lsblk -f -o NAME,FSTYPE -P", cancellationToken);
+                if (!success || string.IsNullOrEmpty(output))
                 {
-                    _logger?.LogWarning("Failed to run lsblk: {Error}", lsblkResult.Error);
+                    _logger?.LogWarning("Failed to run lsblk: {Error}", error);
                     return null;
                 }
 
                 // Step 3: Parse output to find filesystem type
                 // Looking for the partition that corresponds to the disk we attached
                 // Format: NAME="sde1" FSTYPE="xfs"
-                var fsType = ParseLsblkOutput(lsblkResult.Output, partitionNumber);
+                var fsType = ParseLsblkOutput(output, partitionNumber);
                 _logger?.LogInformation("Detected filesystem type: {FsType}", fsType ?? "unknown");
                 return fsType;
             }
             finally
             {
                 // Step 4: Always detach the disk
-                await RunElevatedWslCommandAsync($"--unmount {diskPath}");
+                // Use cancellation token if not already cancelled, otherwise use None to allow cleanup to proceed
+                var cleanupToken = cancellationToken.IsCancellationRequested
+                    ? CancellationToken.None
+                    : cancellationToken;
+                try
+                {
+                    await RunElevatedWslCommandAsync($"--unmount {diskPath}", cleanupToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    // If cleanup was cancelled, log but don't throw - cleanup should complete if possible
+                    _logger?.LogWarning("Cleanup unmount operation was cancelled for disk {DiskIndex}", diskIndex);
+                }
             }
         }
         catch (Exception ex)
@@ -515,33 +547,33 @@ public class ScriptExecutor : IScriptExecutor
             return null;
         }
     }
-    
+
     /// <summary>
     /// Checks if a disk is already mounted in WSL.
     /// </summary>
-    private async Task<bool> IsDiskAlreadyMountedAsync(int diskIndex, int partitionNumber)
+    private async Task<bool> IsDiskAlreadyMountedAsync(int diskIndex, int partitionNumber, CancellationToken cancellationToken = default)
     {
         try
         {
             // Check if the mount path exists via UNC
             var mountName = $"PHYSICALDRIVE{diskIndex}p{partitionNumber}";
-            
+
             // Try to find a WSL distro and check if mount exists
-            var distroResult = await RunWslCommandAsync("-l -q");
-            if (!distroResult.Success || string.IsNullOrEmpty(distroResult.Output))
+            var (success, output, _) = await RunWslCommandAsync("-l -q", cancellationToken);
+            if (!success || string.IsNullOrEmpty(output))
                 return false;
-            
-            var distros = distroResult.Output
+
+            var distros = output
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries)
                 .Select(d => d.Trim().Replace("\0", ""))
                 .Where(d => !string.IsNullOrWhiteSpace(d))
                 .ToList();
-            
+
             if (distros.Count == 0) return false;
-            
+
             var distroName = distros[0];
             var uncPath = $@"\\wsl.localhost\{distroName}\mnt\wsl\{mountName}";
-            
+
             return Directory.Exists(uncPath);
         }
         catch
@@ -553,7 +585,7 @@ public class ScriptExecutor : IScriptExecutor
     /// <summary>
     /// Runs an elevated WSL command (requires UAC).
     /// </summary>
-    private async Task<(bool Success, string? Output, string? Error)> RunElevatedWslCommandAsync(string arguments)
+    private async Task<(bool Success, string? Output, string? Error)> RunElevatedWslCommandAsync(string arguments, CancellationToken cancellationToken = default)
     {
         var tempFile = Path.Combine(Path.GetTempPath(), $"wsl_output_{Guid.NewGuid()}.txt");
 
@@ -575,7 +607,7 @@ public class ScriptExecutor : IScriptExecutor
                 return (false, null, "Failed to start WSL process");
             }
 
-            await process.WaitForExitAsync();
+            await process.WaitForExitAsync(cancellationToken);
             return (process.ExitCode == 0, null, process.ExitCode != 0 ? $"Exit code: {process.ExitCode}" : null);
         }
         catch (Exception ex)
@@ -594,7 +626,7 @@ public class ScriptExecutor : IScriptExecutor
     /// lead to command injection attacks. All current usages pass hard-coded commands like
     /// "lsblk -f -o NAME,FSTYPE -P" or "-l -q" which are safe.
     /// </remarks>
-    private async Task<(bool Success, string? Output, string? Error)> RunWslCommandAsync(string linuxCommand)
+    private async Task<(bool Success, string? Output, string? Error)> RunWslCommandAsync(string linuxCommand, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -616,9 +648,9 @@ public class ScriptExecutor : IScriptExecutor
                 return (false, null, "Failed to start WSL process");
             }
 
-            var output = await process.StandardOutput.ReadToEndAsync();
-            var error = await process.StandardError.ReadToEndAsync();
-            await process.WaitForExitAsync();
+            var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var error = await process.StandardError.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken);
 
             return (process.ExitCode == 0, output, error);
         }
@@ -631,7 +663,7 @@ public class ScriptExecutor : IScriptExecutor
     /// <summary>
     /// Parses lsblk output to find the filesystem type for a partition.
     /// </summary>
-    private string? ParseLsblkOutput(string output, int partitionNumber)
+    private static string? ParseLsblkOutput(string output, int partitionNumber)
     {
         // The mounted disk will be the last sd* device
         // We're looking for lines like: NAME="sde1" FSTYPE="xfs"

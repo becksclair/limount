@@ -182,21 +182,36 @@ public class NegativeTestCases : IDisposable
     #region MountOrchestrator Negative Tests
 
     [Fact]
-    public void MountOrchestrator_NullScriptExecutor_ThrowsArgumentNullException()
+    public void MountOrchestrator_NullMountScriptService_ThrowsArgumentNullException()
     {
+        // Arrange
+        var mockDriveMappingService = new TestDriveMappingService();
+
         // Act & Assert
-        var act = () => new MountOrchestrator(null!, _config);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("scriptExecutor");
+        var act = () => new MountOrchestrator(null!, mockDriveMappingService, _config);
+        act.Should().Throw<ArgumentNullException>().WithParameterName("mountScriptService");
+    }
+
+    [Fact]
+    public void MountOrchestrator_NullDriveMappingService_ThrowsArgumentNullException()
+    {
+        // Arrange
+        var mockMountScriptService = new TestMountScriptService();
+
+        // Act & Assert
+        var act = () => new MountOrchestrator(mockMountScriptService, null!, _config);
+        act.Should().Throw<ArgumentNullException>().WithParameterName("driveMappingService");
     }
 
     [Fact]
     public void MountOrchestrator_NullConfig_ThrowsArgumentNullException()
     {
-        // Arrange - use a mock script executor
-        var mockExecutor = new TestScriptExecutor();
+        // Arrange - use mock services
+        var mockMountScriptService = new TestMountScriptService();
+        var mockDriveMappingService = new TestDriveMappingService();
 
         // Act & Assert
-        var act = () => new MountOrchestrator(mockExecutor, null!);
+        var act = () => new MountOrchestrator(mockMountScriptService, mockDriveMappingService, null!);
         act.Should().Throw<ArgumentNullException>().WithParameterName("config");
     }
 
@@ -235,23 +250,35 @@ public class NegativeTestCases : IDisposable
     #region Helper Classes
 
     /// <summary>
-    /// Test implementation of IScriptExecutor for testing orchestrators.
+    /// Test implementation of IMountScriptService for testing orchestrators.
     /// </summary>
-    private class TestScriptExecutor : Core.Interfaces.IScriptExecutor
+    private class TestMountScriptService : Core.Interfaces.IMountScriptService
     {
-        public Task<MountResult> ExecuteMountScriptAsync(int diskIndex, int partition, string fsType, string? distroName = null)
+        public Task<MountResult> ExecuteMountScriptAsync(int diskIndex, int partition, string fsType, string? distroName = null, CancellationToken cancellationToken = default)
             => Task.FromResult(new MountResult { Success = false });
 
-        public Task<UnmountResult> ExecuteUnmountScriptAsync(int diskIndex)
+        public Task<UnmountResult> ExecuteUnmountScriptAsync(int diskIndex, CancellationToken cancellationToken = default)
             => Task.FromResult(new UnmountResult { Success = false });
+    }
 
-        public Task<MappingResult> ExecuteMappingScriptAsync(char driveLetter, string targetUNC)
+    /// <summary>
+    /// Test implementation of IDriveMappingService for testing orchestrators.
+    /// </summary>
+    private class TestDriveMappingService : Core.Interfaces.IDriveMappingService
+    {
+        public Task<MappingResult> ExecuteMappingScriptAsync(char driveLetter, string targetUNC, CancellationToken cancellationToken = default)
             => Task.FromResult(new MappingResult { Success = false });
 
-        public Task<UnmappingResult> ExecuteUnmappingScriptAsync(char driveLetter)
+        public Task<UnmappingResult> ExecuteUnmappingScriptAsync(char driveLetter, CancellationToken cancellationToken = default)
             => Task.FromResult(new UnmappingResult { Success = false });
+    }
 
-        public Task<string?> DetectFilesystemTypeAsync(int diskIndex, int partitionNumber)
+    /// <summary>
+    /// Test implementation of IFilesystemDetectionService for testing.
+    /// </summary>
+    private class TestFilesystemDetectionService : Core.Interfaces.IFilesystemDetectionService
+    {
+        public Task<string?> DetectFilesystemTypeAsync(int diskIndex, int partitionNumber, CancellationToken cancellationToken = default)
             => Task.FromResult<string?>(null);
     }
 

@@ -1,7 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.26100.0</TargetPlatformMinVersion>
+    <WindowsSdkPackageVersion>10.0.26100.81</WindowsSdkPackageVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -34,6 +36,7 @@
     <!-- Reference to the projects being tested -->
     <ProjectReference Include="..\LiMount.Core\LiMount.Core.csproj" />
     <ProjectReference Include="..\LiMount.App\LiMount.App.csproj" />
+    <ProjectReference Include="..\LiMount.WinUI\LiMount.WinUI.csproj" />
   </ItemGroup>
 
 </Project>

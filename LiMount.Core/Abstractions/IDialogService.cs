@@ -1,36 +1,36 @@
-namespace LiMount.App.Services;
+namespace LiMount.Core.Abstractions;
 
 /// <summary>
-/// Service for displaying dialogs to the user.
-/// Abstracts UI dialog implementation to make ViewModels testable.
+/// Platform-agnostic interface for showing dialogs to the user.
+/// Implementations should use the platform-specific dialog mechanisms (MessageBox, ContentDialog, etc.).
 /// </summary>
 public interface IDialogService
 {
     /// <summary>
-    /// Shows a confirmation dialog asking the user to confirm an action.
+    /// Shows a confirmation dialog with Yes/No options.
     /// </summary>
     /// <param name="message">The message to display.</param>
     /// <param name="title">The dialog title.</param>
-    /// <param name="dialogType">The type of dialog (Info, Warning, Error).</param>
-    /// <returns>True if user confirmed, false if user cancelled.</returns>
-    Task<bool> ConfirmAsync(string message, string title, DialogType dialogType = DialogType.Warning);
+    /// <param name="type">The type of dialog (affects styling).</param>
+    /// <returns>True if the user confirmed, false otherwise.</returns>
+    Task<bool> ConfirmAsync(string message, string title, DialogType type = DialogType.Warning);
 
     /// <summary>
-    /// Shows an error message to the user.
+    /// Shows an error dialog.
     /// </summary>
     /// <param name="message">The error message to display.</param>
     /// <param name="title">The dialog title.</param>
     Task ShowErrorAsync(string message, string title = "Error");
 
     /// <summary>
-    /// Shows an informational message to the user.
+    /// Shows an informational dialog.
     /// </summary>
-    /// <param name="message">The information message to display.</param>
+    /// <param name="message">The message to display.</param>
     /// <param name="title">The dialog title.</param>
     Task ShowInfoAsync(string message, string title = "Information");
 
     /// <summary>
-    /// Shows a warning message to the user.
+    /// Shows a warning dialog.
     /// </summary>
     /// <param name="message">The warning message to display.</param>
     /// <param name="title">The dialog title.</param>
@@ -38,7 +38,7 @@ public interface IDialogService
 }
 
 /// <summary>
-/// Type of dialog to display.
+/// Specifies the type of dialog to display.
 /// </summary>
 public enum DialogType
 {

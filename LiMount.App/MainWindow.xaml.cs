@@ -2,7 +2,7 @@ using System.Windows;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using LiMount.App.ViewModels;
-using LiMount.App.Services;
+using LiMount.Core.Abstractions;
 using LiMount.Core.Configuration;
 
 namespace LiMount.App;

@@ -1,3 +1,4 @@
+using System.IO;
 using Moq;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
@@ -17,32 +18,41 @@ public class MountOrchestratorTests
     private readonly Mock<IMountScriptService> _mockMountScriptService;
     private readonly Mock<IDriveMappingService> _mockDriveMappingService;
     private readonly Mock<IMountHistoryService> _mockHistoryService;
+    private readonly Mock<IMountStateService> _mockMountStateService;
     private readonly Mock<IOptions<LiMountConfiguration>> _mockConfig;
     private readonly MountOrchestrator _orchestrator;
+    private readonly string _existingUncPath;
 
     public MountOrchestratorTests()
     {
         _mockMountScriptService = new Mock<IMountScriptService>();
         _mockDriveMappingService = new Mock<IDriveMappingService>();
         _mockHistoryService = new Mock<IMountHistoryService>();
+        _mockMountStateService = new Mock<IMountStateService>();
         _mockConfig = new Mock<IOptions<LiMountConfiguration>>();
+        _existingUncPath = Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
         // Setup default configuration
         var config = new LiMountConfiguration
         {
             MountOperations = new MountOperationsConfig
             {
-                UncAccessibilityRetries = 5,
-                UncAccessibilityDelayMs = 100 // Shorter delay for tests
+                UncAccessibilityRetries = 1,
+                UncAccessibilityDelayMs = 50 // Shorter delay for tests
             }
         };
         _mockConfig.Setup(c => c.Value).Returns(config);
+
+        _mockMountScriptService
+            .Setup(e => e.ExecuteUnmountScriptAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new UnmountResult { Success = true });
 
         _orchestrator = new MountOrchestrator(
             _mockMountScriptService.Object,
             _mockDriveMappingService.Object,
             _mockConfig.Object,
-            _mockHistoryService.Object);
+            _mockHistoryService.Object,
+            _mockMountStateService.Object);
     }
 
     [Fact]
@@ -129,7 +139,7 @@ public class MountOrchestratorTests
             Success = true,
             DistroName = "Ubuntu",
             MountPathLinux = "/mnt/wsl/PHYSICALDRIVE1p1",
-            MountPathUNC = @"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p1"
+            MountPathUNC = _existingUncPath
         };
         _mockMountScriptService
             .Setup(e => e.ExecuteMountScriptAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -152,6 +162,12 @@ public class MountOrchestratorTests
         result.Success.Should().BeFalse();
         result.FailedStep.Should().Be("map");
         result.ErrorMessage.Should().Contain("Drive letter already in use");
+        _mockMountScriptService.Verify(
+            s => s.ExecuteUnmountScriptAsync(1, It.IsAny<CancellationToken>()),
+            Times.Once);
+        _mockMountStateService.Verify(
+            s => s.UnregisterMountAsync(1, It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
@@ -163,7 +179,7 @@ public class MountOrchestratorTests
             Success = true,
             DistroName = "Ubuntu",
             MountPathLinux = "/mnt/wsl/PHYSICALDRIVE1p1",
-            MountPathUNC = @"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p1"
+            MountPathUNC = _existingUncPath
         };
         _mockMountScriptService
             .Setup(e => e.ExecuteMountScriptAsync(1, 1, "ext4", null, It.IsAny<CancellationToken>()))
@@ -173,10 +189,10 @@ public class MountOrchestratorTests
         {
             Success = true,
             DriveLetter = "Z",
-            TargetUNC = @"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p1"
+            TargetUNC = _existingUncPath
         };
         _mockDriveMappingService
-            .Setup(e => e.ExecuteMappingScriptAsync('Z', @"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p1", It.IsAny<CancellationToken>()))
+            .Setup(e => e.ExecuteMappingScriptAsync('Z', _existingUncPath, It.IsAny<CancellationToken>()))
             .ReturnsAsync(mappingResult);
 
         // Act
@@ -190,7 +206,16 @@ public class MountOrchestratorTests
         result.DriveLetter.Should().Be('Z');
         result.DistroName.Should().Be("Ubuntu");
         result.MountPathLinux.Should().Be("/mnt/wsl/PHYSICALDRIVE1p1");
-        result.MountPathUNC.Should().Be(@"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p1");
+        result.MountPathUNC.Should().Be(_existingUncPath);
+        _mockMountStateService.Verify(
+            s => s.RegisterMountAsync(
+                It.Is<ActiveMount>(m =>
+                    m.DiskIndex == 1 &&
+                    m.PartitionNumber == 1 &&
+                    m.DriveLetter == 'Z' &&
+                    m.MountPathUNC == _existingUncPath),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
@@ -202,7 +227,7 @@ public class MountOrchestratorTests
             Success = true,
             DistroName = "Ubuntu",
             MountPathLinux = "/mnt/wsl/PHYSICALDRIVE1p1",
-            MountPathUNC = @"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p1"
+            MountPathUNC = _existingUncPath
         };
         _mockMountScriptService
             .Setup(e => e.ExecuteMountScriptAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -242,5 +267,230 @@ public class MountOrchestratorTests
                 It.Is<MountHistoryEntry>(e => !e.Success && e.OperationType == MountHistoryOperationType.Mount),
                 It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Fact]
+    public async Task MountAndMapAsync_MountReturnsNoUnc_RollsBackAndFails()
+    {
+        // Arrange
+        var mountResult = new MountResult
+        {
+            Success = true,
+            DistroName = "Ubuntu",
+            MountPathLinux = "/mnt/wsl/PHYSICALDRIVE1p1",
+            MountPathUNC = null
+        };
+
+        _mockMountScriptService
+            .Setup(e => e.ExecuteMountScriptAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mountResult);
+
+        // Act
+        var result = await _orchestrator.MountAndMapAsync(1, 1, 'Z');
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.FailedStep.Should().Be("mount");
+        result.ErrorMessage.Should().Contain("no UNC path");
+        _mockDriveMappingService.Verify(
+            m => m.ExecuteMappingScriptAsync(It.IsAny<char>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _mockMountScriptService.Verify(
+            s => s.ExecuteUnmountScriptAsync(1, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task MountAndMapAsync_MappingFailure_RollbackFailureAddsContext()
+    {
+        // Arrange
+        var mountResult = new MountResult
+        {
+            Success = true,
+            DistroName = "Ubuntu",
+            MountPathLinux = "/mnt/wsl/PHYSICALDRIVE1p1",
+            MountPathUNC = _existingUncPath
+        };
+        _mockMountScriptService
+            .Setup(e => e.ExecuteMountScriptAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mountResult);
+
+        var mappingResult = new MappingResult
+        {
+            Success = false,
+            ErrorMessage = "Drive letter already in use"
+        };
+        _mockDriveMappingService
+            .Setup(e => e.ExecuteMappingScriptAsync(It.IsAny<char>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mappingResult);
+
+        _mockMountScriptService
+            .Setup(e => e.ExecuteUnmountScriptAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new UnmountResult { Success = false, ErrorMessage = "Rollback failed" });
+
+        // Act
+        var result = await _orchestrator.MountAndMapAsync(1, 1, 'Z');
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("Drive letter already in use");
+        result.ErrorMessage.Should().Contain("cleanup");
+        result.ErrorMessage.Should().Contain("Rollback failed");
+        _mockMountScriptService.Verify(
+            s => s.ExecuteUnmountScriptAsync(1, It.IsAny<CancellationToken>()),
+            Times.Once);
+        _mockMountStateService.Verify(
+            s => s.UnregisterMountAsync(1, It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task MountAndMapAsync_MappingFailure_SkipsRollbackWhenExistingMountDoesNotMatch()
+    {
+        // Arrange
+        var preExistingMount = new ActiveMount
+        {
+            DiskIndex = 1,
+            PartitionNumber = 9,
+            MountPathUNC = @"\\wsl$\Other\mnt\wsl\PHYSICALDRIVE1p9"
+        };
+        _mockMountStateService
+            .Setup(s => s.GetMountForDiskAsync(1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(preExistingMount);
+
+        var mountResult = new MountResult
+        {
+            Success = true,
+            DistroName = "Ubuntu",
+            MountPathLinux = "/mnt/wsl/PHYSICALDRIVE1p1",
+            MountPathUNC = _existingUncPath
+        };
+        _mockMountScriptService
+            .Setup(e => e.ExecuteMountScriptAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mountResult);
+
+        var mappingResult = new MappingResult
+        {
+            Success = false,
+            ErrorMessage = "Drive letter already in use"
+        };
+        _mockDriveMappingService
+            .Setup(e => e.ExecuteMappingScriptAsync(It.IsAny<char>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mappingResult);
+
+        // Act
+        var result = await _orchestrator.MountAndMapAsync(1, 1, 'Z');
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("cleanup");
+        result.ErrorMessage.Should().Contain("skipped");
+        _mockMountScriptService.Verify(
+            s => s.ExecuteUnmountScriptAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _mockMountStateService.Verify(
+            s => s.UnregisterMountAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task MountAndMapAsync_UncInaccessibleBeforeMapping_RollsBack()
+    {
+        // Arrange
+        var mountResult = new MountResult
+        {
+            Success = true,
+            DistroName = "Ubuntu",
+            MountPathLinux = "/mnt/wsl/PHYSICALDRIVE1p1",
+            MountPathUNC = @"\\wsl$\Ubuntu\mnt\wsl\_nonexistent_path"
+        };
+        _mockMountScriptService
+            .Setup(e => e.ExecuteMountScriptAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mountResult);
+
+        // Act
+        var result = await _orchestrator.MountAndMapAsync(1, 1, 'Z');
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.FailedStep.Should().Be("mount");
+        result.ErrorMessage.Should().Contain("not accessible");
+        _mockMountScriptService.Verify(
+            s => s.ExecuteUnmountScriptAsync(1, It.IsAny<CancellationToken>()),
+            Times.Once);
+        _mockMountStateService.Verify(
+            s => s.UnregisterMountAsync(1, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task MountAndMapAsync_DriveLetterConflict_FailsFast()
+    {
+        // Arrange
+        var conflictingMount = new ActiveMount
+        {
+            DiskIndex = 9,
+            PartitionNumber = 9,
+            DriveLetter = 'Z',
+            MountPathUNC = @"\\wsl$\Other\mnt\wsl\PHYSICALDRIVE9p9"
+        };
+        _mockMountStateService
+            .Setup(s => s.GetMountForDriveLetterAsync('Z', It.IsAny<CancellationToken>()))
+            .ReturnsAsync(conflictingMount);
+
+        // Act
+        var result = await _orchestrator.MountAndMapAsync(1, 1, 'Z');
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.FailedStep.Should().Be("validation");
+        result.ErrorMessage.Should().Contain("already mapped");
+        _mockMountScriptService.Verify(
+            s => s.ExecuteMountScriptAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _mockDriveMappingService.Verify(
+            m => m.ExecuteMappingScriptAsync(It.IsAny<char>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _mockMountStateService.Verify(
+            s => s.RegisterMountAsync(It.IsAny<ActiveMount>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task MountAndMapAsync_IdempotentWhenDriveAlreadyMappedToSameTarget()
+    {
+        // Arrange
+        var existingMount = new ActiveMount
+        {
+            DiskIndex = 1,
+            PartitionNumber = 1,
+            DriveLetter = 'Z',
+            MountPathLinux = "/mnt/wsl/PHYSICALDRIVE1p1",
+            MountPathUNC = _existingUncPath,
+            DistroName = "Ubuntu"
+        };
+        _mockMountStateService
+            .Setup(s => s.GetMountForDriveLetterAsync('Z', It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingMount);
+
+        // Act
+        var result = await _orchestrator.MountAndMapAsync(1, 1, 'Z');
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.MountPathUNC.Should().Be(_existingUncPath);
+        result.DriveLetter.Should().Be('Z');
+        _mockMountScriptService.Verify(
+            s => s.ExecuteMountScriptAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _mockDriveMappingService.Verify(
+            m => m.ExecuteMappingScriptAsync(It.IsAny<char>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _mockHistoryService.Verify(
+            h => h.AddEntryAsync(It.IsAny<MountHistoryEntry>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _mockMountStateService.Verify(
+            s => s.RegisterMountAsync(It.IsAny<ActiveMount>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 }

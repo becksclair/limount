@@ -13,9 +13,11 @@ public interface IUnmountOrchestrator
     /// <param name="diskIndex">Physical disk index to unmount.</param>
     /// <param name="driveLetter">Drive letter to unmap (optional if not mapped).</param>
     /// <param name="progress">Optional progress reporter that receives status messages.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>An <see cref="UnmountAndUnmapResult"/> describing the outcomes of the unmapping and unmount operations.</returns>
     Task<UnmountAndUnmapResult> UnmountAndUnmapAsync(
         int diskIndex,
         char? driveLetter = null,
-        IProgress<string>? progress = null);
+        IProgress<string>? progress = null,
+        CancellationToken cancellationToken = default);
 }

@@ -1,5 +1,6 @@
 using FluentAssertions;
 using LiMount.App.Services;
+using LiMount.Core.Abstractions;
 
 namespace LiMount.Tests.Services;
 

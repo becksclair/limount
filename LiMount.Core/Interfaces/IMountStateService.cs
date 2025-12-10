@@ -11,58 +11,67 @@ public interface IMountStateService
     /// <summary>
     /// Gets all currently active mounts.
     /// </summary>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>Read-only list of active mounts.</returns>
-    Task<IReadOnlyList<ActiveMount>> GetActiveMountsAsync();
+    Task<IReadOnlyList<ActiveMount>> GetActiveMountsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Registers a new mount operation.
     /// </summary>
     /// <param name="mount">The active mount to register.</param>
-    Task RegisterMountAsync(ActiveMount mount);
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    Task RegisterMountAsync(ActiveMount mount, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Unregisters a mount operation by disk index.
     /// </summary>
     /// <param name="diskIndex">The disk index to unregister.</param>
-    Task UnregisterMountAsync(int diskIndex);
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    Task UnregisterMountAsync(int diskIndex, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets the active mount for a specific disk, if any.
     /// </summary>
     /// <param name="diskIndex">The disk index to query.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>The active mount or null if not found.</returns>
-    Task<ActiveMount?> GetMountForDiskAsync(int diskIndex);
+    Task<ActiveMount?> GetMountForDiskAsync(int diskIndex, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets the active mount for a specific drive letter, if any.
     /// </summary>
     /// <param name="driveLetter">The drive letter to query.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>The active mount or null if not found.</returns>
-    Task<ActiveMount?> GetMountForDriveLetterAsync(char driveLetter);
+    Task<ActiveMount?> GetMountForDriveLetterAsync(char driveLetter, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Checks if a specific disk is currently mounted.
     /// </summary>
     /// <param name="diskIndex">The disk index to check.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>True if the disk is mounted, false otherwise.</returns>
-    Task<bool> IsDiskMountedAsync(int diskIndex);
+    Task<bool> IsDiskMountedAsync(int diskIndex, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Checks if a specific drive letter is currently in use by a mount.
     /// </summary>
     /// <param name="driveLetter">The drive letter to check.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>True if the drive letter is in use, false otherwise.</returns>
-    Task<bool> IsDriveLetterInUseAsync(char driveLetter);
+    Task<bool> IsDriveLetterInUseAsync(char driveLetter, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Verifies and reconciles mount state with actual WSL/Windows state.
     /// Should be called on application startup to detect orphaned mounts.
     /// </summary>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>List of mounts that were found to be stale/orphaned.</returns>
-    Task<IReadOnlyList<ActiveMount>> ReconcileMountStateAsync();
+    Task<IReadOnlyList<ActiveMount>> ReconcileMountStateAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Clears all mount state (for testing or cleanup purposes).
     /// </summary>
-    Task ClearAllMountsAsync();
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    Task ClearAllMountsAsync(CancellationToken cancellationToken = default);
 }

@@ -22,4 +22,4 @@ if (-not (Test-Path $dotnet)) {
     -c $Configuration `
     -p:PublishProfile=win-x64
 
-Write-Host "Publish complete. Output: LiMount.App/bin/publish/win-x64/" -ForegroundColor Green
+Write-Host "Publish complete. Output: LiMount.App/bin/" -ForegroundColor Green

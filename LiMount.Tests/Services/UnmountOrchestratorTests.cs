@@ -13,15 +13,20 @@ namespace LiMount.Tests.Services;
 /// </summary>
 public class UnmountOrchestratorTests
 {
-    private readonly Mock<IScriptExecutor> _mockScriptExecutor;
+    private readonly Mock<IMountScriptService> _mockMountScriptService;
+    private readonly Mock<IDriveMappingService> _mockDriveMappingService;
     private readonly Mock<IMountHistoryService> _mockHistoryService;
     private readonly UnmountOrchestrator _orchestrator;
 
     public UnmountOrchestratorTests()
     {
-        _mockScriptExecutor = new Mock<IScriptExecutor>();
+        _mockMountScriptService = new Mock<IMountScriptService>();
+        _mockDriveMappingService = new Mock<IDriveMappingService>();
         _mockHistoryService = new Mock<IMountHistoryService>();
-        _orchestrator = new UnmountOrchestrator(_mockScriptExecutor.Object, _mockHistoryService.Object);
+        _orchestrator = new UnmountOrchestrator(
+            _mockMountScriptService.Object,
+            _mockDriveMappingService.Object,
+            _mockHistoryService.Object);
     }
 
     [Fact]
@@ -59,16 +64,16 @@ public class UnmountOrchestratorTests
             Success = false,
             ErrorMessage = "Drive letter unmapping failed"
         };
-        _mockScriptExecutor
-            .Setup(e => e.ExecuteUnmappingScriptAsync(It.IsAny<char>()))
+        _mockDriveMappingService
+            .Setup(e => e.ExecuteUnmappingScriptAsync(It.IsAny<char>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(unmappingResult);
 
         var unmountResult = new UnmountResult
         {
             Success = true
         };
-        _mockScriptExecutor
-            .Setup(e => e.ExecuteUnmountScriptAsync(It.IsAny<int>()))
+        _mockMountScriptService
+            .Setup(e => e.ExecuteUnmountScriptAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(unmountResult);
 
         // Act
@@ -79,7 +84,7 @@ public class UnmountOrchestratorTests
         result.Success.Should().BeFalse();
         result.FailedStep.Should().Be("unmap");
         result.ErrorMessage.Should().Contain("Drive letter unmapping failed");
-        _mockScriptExecutor.Verify(e => e.ExecuteUnmountScriptAsync(1), Times.Once);
+        _mockMountScriptService.Verify(e => e.ExecuteUnmountScriptAsync(1, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -91,8 +96,8 @@ public class UnmountOrchestratorTests
             Success = true,
             DriveLetter = "Z"
         };
-        _mockScriptExecutor
-            .Setup(e => e.ExecuteUnmappingScriptAsync(It.IsAny<char>()))
+        _mockDriveMappingService
+            .Setup(e => e.ExecuteUnmappingScriptAsync(It.IsAny<char>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(unmappingResult);
 
         var unmountResult = new UnmountResult
@@ -100,8 +105,8 @@ public class UnmountOrchestratorTests
             Success = false,
             ErrorMessage = "Unmount operation failed"
         };
-        _mockScriptExecutor
-            .Setup(e => e.ExecuteUnmountScriptAsync(It.IsAny<int>()))
+        _mockMountScriptService
+            .Setup(e => e.ExecuteUnmountScriptAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(unmountResult);
 
         // Act
@@ -123,16 +128,16 @@ public class UnmountOrchestratorTests
             Success = true,
             DriveLetter = "Z"
         };
-        _mockScriptExecutor
-            .Setup(e => e.ExecuteUnmappingScriptAsync('Z'))
+        _mockDriveMappingService
+            .Setup(e => e.ExecuteUnmappingScriptAsync('Z', It.IsAny<CancellationToken>()))
             .ReturnsAsync(unmappingResult);
 
         var unmountResult = new UnmountResult
         {
             Success = true
         };
-        _mockScriptExecutor
-            .Setup(e => e.ExecuteUnmountScriptAsync(1))
+        _mockMountScriptService
+            .Setup(e => e.ExecuteUnmountScriptAsync(1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(unmountResult);
 
         // Act
@@ -152,13 +157,13 @@ public class UnmountOrchestratorTests
     {
         // Arrange
         var unmappingResult = new UnmappingResult { Success = true, DriveLetter = "Z" };
-        _mockScriptExecutor
-            .Setup(e => e.ExecuteUnmappingScriptAsync(It.IsAny<char>()))
+        _mockDriveMappingService
+            .Setup(e => e.ExecuteUnmappingScriptAsync(It.IsAny<char>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(unmappingResult);
 
         var unmountResult = new UnmountResult { Success = true };
-        _mockScriptExecutor
-            .Setup(e => e.ExecuteUnmountScriptAsync(It.IsAny<int>()))
+        _mockMountScriptService
+            .Setup(e => e.ExecuteUnmountScriptAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(unmountResult);
 
         // Act
@@ -175,13 +180,13 @@ public class UnmountOrchestratorTests
     {
         // Arrange
         var unmappingResult = new UnmappingResult { Success = false, ErrorMessage = "Test error" };
-        _mockScriptExecutor
-            .Setup(e => e.ExecuteUnmappingScriptAsync(It.IsAny<char>()))
+        _mockDriveMappingService
+            .Setup(e => e.ExecuteUnmappingScriptAsync(It.IsAny<char>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(unmappingResult);
 
         var unmountResult = new UnmountResult { Success = true };
-        _mockScriptExecutor
-            .Setup(e => e.ExecuteUnmountScriptAsync(It.IsAny<int>()))
+        _mockMountScriptService
+            .Setup(e => e.ExecuteUnmountScriptAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(unmountResult);
 
         // Act

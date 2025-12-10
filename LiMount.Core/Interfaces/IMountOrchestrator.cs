@@ -16,6 +16,7 @@ public interface IMountOrchestrator
     /// <param name="fsType">Filesystem type to use for mounting (defaults to "ext4").</param>
     /// <param name="distroName">Optional WSL distribution name to perform the mount within; uses the default distribution if null.</param>
     /// <param name="progress">Optional progress reporter that receives human-readable status updates.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>A MountAndMapResult representing the outcome of the mount and mapping operations.</returns>
     Task<MountAndMapResult> MountAndMapAsync(
         int diskIndex,
@@ -23,5 +24,6 @@ public interface IMountOrchestrator
         char driveLetter,
         string fsType = "ext4",
         string? distroName = null,
-        IProgress<string>? progress = null);
+        IProgress<string>? progress = null,
+        CancellationToken cancellationToken = default);
 }

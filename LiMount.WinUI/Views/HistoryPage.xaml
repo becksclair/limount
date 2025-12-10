@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="LiMount.WinUI.Views.HistoryPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:controls="using:CommunityToolkit.WinUI.UI.Controls"
+    mc:Ignorable="d"
+    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,20">
+            <TextBlock Text="Mount History"
+                       FontSize="24"
+                       FontWeight="Bold"
+                       Foreground="{StaticResource TextPrimaryBrush}"/>
+            <TextBlock Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+                       FontSize="14"
+                       Foreground="{StaticResource TextSecondaryBrush}"
+                       Margin="0,4,0,0"/>
+        </StackPanel>
+
+        <!-- History DataGrid -->
+        <Border Grid.Row="1"
+                Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+            <controls:DataGrid x:Name="HistoryDataGrid"
+                              ItemsSource="{x:Bind ViewModel.HistoryEntries, Mode=OneWay}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              SelectionMode="Single"
+                              GridLinesVisibility="Horizontal"
+                              HeadersVisibility="Column"
+                              AlternatingRowBackground="#FFF9F9F9"
+                              RowBackground="White"
+                              BorderThickness="0">
+
+                <controls:DataGrid.Columns>
+                    <controls:DataGridTextColumn Header="Timestamp"
+                                                 Binding="{Binding Timestamp}"
+                                                 Width="150"/>
+
+                    <controls:DataGridTextColumn Header="Operation"
+                                                 Binding="{Binding OperationType}"
+                                                 Width="100"/>
+
+                    <controls:DataGridTextColumn Header="Status"
+                                                 Binding="{Binding StatusDisplay}"
+                                                 Width="80"/>
+
+                    <controls:DataGridTextColumn Header="Disk"
+                                                 Binding="{Binding DiskIndex}"
+                                                 Width="60"/>
+
+                    <controls:DataGridTextColumn Header="Partition"
+                                                 Binding="{Binding PartitionNumber}"
+                                                 Width="80"/>
+
+                    <controls:DataGridTextColumn Header="Drive"
+                                                 Binding="{Binding DriveLetterDisplay}"
+                                                 Width="60"/>
+
+                    <controls:DataGridTextColumn Header="Distro"
+                                                 Binding="{Binding DistroName}"
+                                                 Width="100"/>
+
+                    <controls:DataGridTextColumn Header="Details"
+                                                 Binding="{Binding DetailsDisplay}"
+                                                 Width="*"/>
+                </controls:DataGrid.Columns>
+            </controls:DataGrid>
+        </Border>
+
+        <!-- Action Buttons -->
+        <StackPanel Grid.Row="2"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,20,0,0"
+                    Spacing="8">
+            <Button Content="Refresh"
+                    Style="{StaticResource ModernButton}"
+                    Command="{x:Bind ViewModel.RefreshCommand}"/>
+            <Button Content="Clear History"
+                    Style="{StaticResource ModernButton}"
+                    Background="{StaticResource ErrorBrush}"
+                    Command="{x:Bind ViewModel.ClearHistoryCommand}"/>
+            <Button x:Name="CloseButton"
+                    Content="Close"
+                    Style="{StaticResource ModernButton}"
+                    Background="Gray"
+                    Click="CloseButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Page>

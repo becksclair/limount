@@ -2,7 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
-using LiMount.App.Services;
+using LiMount.Core.Abstractions;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
 

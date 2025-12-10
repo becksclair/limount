@@ -11,23 +11,27 @@ public interface IMountHistoryService
     /// Adds a history entry for a mount or unmount operation.
     /// </summary>
     /// <param name="entry">The history entry to add.</param>
-    Task AddEntryAsync(MountHistoryEntry entry);
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    Task AddEntryAsync(MountHistoryEntry entry, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets all history entries, ordered by timestamp (newest first).
     /// </summary>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>List of all history entries.</returns>
-    Task<IReadOnlyList<MountHistoryEntry>> GetHistoryAsync();
+    Task<IReadOnlyList<MountHistoryEntry>> GetHistoryAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Clears all history entries.
     /// </summary>
-    Task ClearHistoryAsync();
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    Task ClearHistoryAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets the most recent mount operation for a specific disk, if any.
     /// </summary>
     /// <param name="diskIndex">The disk index to search for.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>The most recent mount entry for the disk, or null if not found.</returns>
-    Task<MountHistoryEntry?> GetLastMountForDiskAsync(int diskIndex);
+    Task<MountHistoryEntry?> GetLastMountForDiskAsync(int diskIndex, CancellationToken cancellationToken = default);
 }

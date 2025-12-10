@@ -32,7 +32,7 @@ public class EnvironmentValidationService : IEnvironmentValidationService
     }
 
     /// <inheritdoc/>
-    public async Task<EnvironmentValidationResult> ValidateEnvironmentAsync()
+    public async Task<EnvironmentValidationResult> ValidateEnvironmentAsync(CancellationToken cancellationToken = default)
     {
         _logger?.LogInformation("Starting environment validation");
 
@@ -60,7 +60,7 @@ public class EnvironmentValidationService : IEnvironmentValidationService
         }
 
         // Check WSL installation
-        var isWslInstalled = await IsWslInstalledAsync();
+        var isWslInstalled = await IsWslInstalledAsync(cancellationToken);
 
         if (!isWslInstalled)
         {
@@ -76,7 +76,7 @@ public class EnvironmentValidationService : IEnvironmentValidationService
         }
 
         // Check for installed distros
-        var distros = await GetInstalledDistrosAsync();
+        var distros = await GetInstalledDistrosAsync(cancellationToken);
 
         if (distros.Count == 0)
         {
@@ -97,7 +97,7 @@ public class EnvironmentValidationService : IEnvironmentValidationService
     }
 
     /// <inheritdoc/>
-    public async Task<bool> IsWslInstalledAsync()
+    public async Task<bool> IsWslInstalledAsync(CancellationToken cancellationToken = default)
     {
         try
         {
@@ -118,7 +118,7 @@ public class EnvironmentValidationService : IEnvironmentValidationService
                 return false;
             }
 
-            await process.WaitForExitAsync();
+            await process.WaitForExitAsync(cancellationToken);
 
             // If wsl.exe exists and runs without error, WSL is installed
             return process.ExitCode == 0;
@@ -131,7 +131,7 @@ public class EnvironmentValidationService : IEnvironmentValidationService
     }
 
     /// <inheritdoc/>
-    public async Task<List<string>> GetInstalledDistrosAsync()
+    public async Task<List<string>> GetInstalledDistrosAsync(CancellationToken cancellationToken = default)
     {
         var distros = new List<string>();
 
@@ -155,8 +155,8 @@ public class EnvironmentValidationService : IEnvironmentValidationService
                 return distros;
             }
 
-            var output = await process.StandardOutput.ReadToEndAsync();
-            await process.WaitForExitAsync();
+            var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken);
 
             if (process.ExitCode != 0)
             {

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <!--
+    Windows App SDK 1.8's "managed" XAML compiler (net6.0) still uses
+    COM interop (RuntimeEnvironment.GetRuntimeInterfaceAsObject) internally,
+    which only works on .NET Framework. The net472 exe is the only option
+    until Microsoft ports the metadata loading to modern .NET APIs.
+  -->
+</Project>

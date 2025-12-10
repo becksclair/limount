@@ -1,8 +1,13 @@
+using LiMount.Core.Results;
+
 namespace LiMount.Core.Models;
 
 /// <summary>
 /// Combined result of the mount and map workflow.
 /// </summary>
+/// <remarks>
+/// Consider using <see cref="Result{MountData}"/> for new code.
+/// </remarks>
 public class MountAndMapResult
 {
     /// <summary>
@@ -108,4 +113,29 @@ public class MountAndMapResult
             FailedStep = failedStep
         };
     }
+
+    /// <summary>
+    /// Converts this result to the generic Result{MountData} type.
+    /// </summary>
+    public Result<MountData> ToResult()
+    {
+        if (Success)
+        {
+            return Result<MountData>.Success(new MountData(
+                DiskIndex,
+                Partition,
+                DriveLetter,
+                DistroName ?? string.Empty,
+                MountPathLinux ?? string.Empty,
+                MountPathUNC ?? string.Empty));
+        }
+
+        return Result<MountData>.Failure(ErrorMessage ?? "Unknown error", FailedStep);
+    }
+
+    /// <summary>
+    /// Implicit conversion to Result{MountData} for seamless migration.
+    /// </summary>
+    public static implicit operator Result<MountData>(MountAndMapResult result)
+        => result.ToResult();
 }

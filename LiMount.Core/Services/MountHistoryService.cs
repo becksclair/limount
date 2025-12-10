@@ -78,15 +78,15 @@ public class MountHistoryService : IMountHistoryService, IDisposable
     /// <summary>
     /// Adds a history entry for a mount or unmount operation.
     /// </summary>
-    public async Task AddEntryAsync(MountHistoryEntry entry)
+    public async Task AddEntryAsync(MountHistoryEntry entry, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(entry);
 
-        await _fileLock.WaitAsync();
+        await _fileLock.WaitAsync(cancellationToken);
         try
         {
-            var history = await LoadHistoryInternalAsync();
+            var history = await LoadHistoryInternalAsync(cancellationToken);
 
             // Trim BEFORE adding to prevent temporary memory overflow
             // Keep only the last (maxEntries - 1) entries to make room for the new one
@@ -97,7 +97,7 @@ public class MountHistoryService : IMountHistoryService, IDisposable
 
             history.Add(entry);
 
-            await SaveHistoryInternalAsync(history);
+            await SaveHistoryInternalAsync(history, cancellationToken);
 
             _logger.LogInformation("Added history entry: {OperationType} for disk {DiskIndex} (Success: {Success})",
                 entry.OperationType, entry.DiskIndex, entry.Success);
@@ -115,14 +115,14 @@ public class MountHistoryService : IMountHistoryService, IDisposable
     /// <summary>
     /// Gets all history entries, ordered by timestamp (newest first).
     /// </summary>
-    public async Task<IReadOnlyList<MountHistoryEntry>> GetHistoryAsync()
+    public async Task<IReadOnlyList<MountHistoryEntry>> GetHistoryAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
 
-        await _fileLock.WaitAsync();
+        await _fileLock.WaitAsync(cancellationToken);
         try
         {
-            var history = await LoadHistoryInternalAsync();
+            var history = await LoadHistoryInternalAsync(cancellationToken);
             return history.OrderByDescending(e => e.Timestamp).ToList();
         }
         catch (Exception ex)
@@ -139,14 +139,14 @@ public class MountHistoryService : IMountHistoryService, IDisposable
     /// <summary>
     /// Clears all history entries.
     /// </summary>
-    public async Task ClearHistoryAsync()
+    public async Task ClearHistoryAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
 
-        await _fileLock.WaitAsync();
+        await _fileLock.WaitAsync(cancellationToken);
         try
         {
-            await SaveHistoryInternalAsync(new List<MountHistoryEntry>());
+            await SaveHistoryInternalAsync(new List<MountHistoryEntry>(), cancellationToken);
             _logger.LogInformation("Cleared mount history");
         }
         catch (Exception ex)
@@ -162,14 +162,14 @@ public class MountHistoryService : IMountHistoryService, IDisposable
     /// <summary>
     /// Gets the most recent mount operation for a specific disk, if any.
     /// </summary>
-    public async Task<MountHistoryEntry?> GetLastMountForDiskAsync(int diskIndex)
+    public async Task<MountHistoryEntry?> GetLastMountForDiskAsync(int diskIndex, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
 
-        await _fileLock.WaitAsync();
+        await _fileLock.WaitAsync(cancellationToken);
         try
         {
-            var history = await LoadHistoryInternalAsync();
+            var history = await LoadHistoryInternalAsync(cancellationToken);
 
             // Single-pass iteration to find the most recent matching entry (O(n) instead of O(n log n))
             MountHistoryEntry? lastMount = null;
@@ -203,7 +203,7 @@ public class MountHistoryService : IMountHistoryService, IDisposable
     /// <summary>
     /// Loads history from JSON file. Must be called within file lock.
     /// </summary>
-    private async Task<List<MountHistoryEntry>> LoadHistoryInternalAsync()
+    private async Task<List<MountHistoryEntry>> LoadHistoryInternalAsync(CancellationToken cancellationToken = default)
     {
         if (!File.Exists(_historyFilePath))
         {
@@ -212,7 +212,7 @@ public class MountHistoryService : IMountHistoryService, IDisposable
 
         try
         {
-            var json = await File.ReadAllTextAsync(_historyFilePath);
+            var json = await File.ReadAllTextAsync(_historyFilePath, cancellationToken);
             var history = JsonSerializer.Deserialize(
                 json,
                 LiMountJsonContext.Default.ListMountHistoryEntry) ?? new List<MountHistoryEntry>();
@@ -228,12 +228,12 @@ public class MountHistoryService : IMountHistoryService, IDisposable
     /// <summary>
     /// Saves history to JSON file. Must be called within file lock.
     /// </summary>
-    private async Task SaveHistoryInternalAsync(List<MountHistoryEntry> history)
+    private async Task SaveHistoryInternalAsync(List<MountHistoryEntry> history, CancellationToken cancellationToken = default)
     {
         var json = JsonSerializer.Serialize(
             history,
             LiMountJsonContext.Default.ListMountHistoryEntry);
-        await File.WriteAllTextAsync(_historyFilePath, json);
+        await File.WriteAllTextAsync(_historyFilePath, json, cancellationToken);
     }
 
     /// <summary>

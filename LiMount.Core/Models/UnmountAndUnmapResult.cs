@@ -1,8 +1,13 @@
+using LiMount.Core.Results;
+
 namespace LiMount.Core.Models;
 
 /// <summary>
 /// Combined result of the unmount and unmap workflow.
 /// </summary>
+/// <remarks>
+/// Consider using <see cref="Result{UnmountData}"/> for new code.
+/// </remarks>
 public class UnmountAndUnmapResult
 {
     /// <summary>
@@ -73,4 +78,23 @@ public class UnmountAndUnmapResult
             FailedStep = failedStep
         };
     }
+
+    /// <summary>
+    /// Converts this result to the generic Result{UnmountData} type.
+    /// </summary>
+    public Result<UnmountData> ToResult()
+    {
+        if (Success)
+        {
+            return Result<UnmountData>.Success(new UnmountData(DiskIndex, DriveLetter));
+        }
+
+        return Result<UnmountData>.Failure(ErrorMessage ?? "Unknown error", FailedStep);
+    }
+
+    /// <summary>
+    /// Implicit conversion to Result{UnmountData} for seamless migration.
+    /// </summary>
+    public static implicit operator Result<UnmountData>(UnmountAndUnmapResult result)
+        => result.ToResult();
 }

@@ -78,14 +78,14 @@ public class MountStateService : IMountStateService, IDisposable
         return Path.Combine(appData, "LiMount", "mount-state.json");
     }
 
-    public async Task<IReadOnlyList<ActiveMount>> GetActiveMountsAsync()
+    public async Task<IReadOnlyList<ActiveMount>> GetActiveMountsAsync(CancellationToken cancellationToken = default)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
 
-        await _fileLock.WaitAsync();
+        await _fileLock.WaitAsync(cancellationToken);
         try
         {
-            var mounts = await LoadMountsInternalAsync();
+            var mounts = await LoadMountsInternalAsync(cancellationToken);
             return mounts.AsReadOnly();
         }
         finally
@@ -94,16 +94,16 @@ public class MountStateService : IMountStateService, IDisposable
         }
     }
 
-    public async Task RegisterMountAsync(ActiveMount mount)
+    public async Task RegisterMountAsync(ActiveMount mount, CancellationToken cancellationToken = default)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
 
         if (mount == null) throw new ArgumentNullException(nameof(mount));
 
-        await _fileLock.WaitAsync();
+        await _fileLock.WaitAsync(cancellationToken);
         try
         {
-            var mounts = await LoadMountsInternalAsync();
+            var mounts = await LoadMountsInternalAsync(cancellationToken);
 
             // Remove any existing mount for this disk
             mounts.RemoveAll(m => m.DiskIndex == mount.DiskIndex);
@@ -126,7 +126,7 @@ public class MountStateService : IMountStateService, IDisposable
             // Add new mount
             mounts.Add(mountCopy);
 
-            await SaveMountsInternalAsync(mounts);
+            await SaveMountsInternalAsync(mounts, cancellationToken);
 
             _logger.LogInformation(
                 "Registered mount: Disk {DiskIndex} -> Drive {DriveLetter}: ({UNC})",
@@ -138,19 +138,19 @@ public class MountStateService : IMountStateService, IDisposable
         }
     }
 
-    public async Task UnregisterMountAsync(int diskIndex)
+    public async Task UnregisterMountAsync(int diskIndex, CancellationToken cancellationToken = default)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
 
-        await _fileLock.WaitAsync();
+        await _fileLock.WaitAsync(cancellationToken);
         try
         {
-            var mounts = await LoadMountsInternalAsync();
+            var mounts = await LoadMountsInternalAsync(cancellationToken);
             var removed = mounts.RemoveAll(m => m.DiskIndex == diskIndex);
 
             if (removed > 0)
             {
-                await SaveMountsInternalAsync(mounts);
+                await SaveMountsInternalAsync(mounts, cancellationToken);
                 _logger.LogInformation("Unregistered mount for disk {DiskIndex}", diskIndex);
             }
         }
@@ -160,14 +160,14 @@ public class MountStateService : IMountStateService, IDisposable
         }
     }
 
-    public async Task<ActiveMount?> GetMountForDiskAsync(int diskIndex)
+    public async Task<ActiveMount?> GetMountForDiskAsync(int diskIndex, CancellationToken cancellationToken = default)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
 
-        await _fileLock.WaitAsync();
+        await _fileLock.WaitAsync(cancellationToken);
         try
         {
-            var mounts = await LoadMountsInternalAsync();
+            var mounts = await LoadMountsInternalAsync(cancellationToken);
             return mounts.FirstOrDefault(m => m.DiskIndex == diskIndex);
         }
         finally
@@ -176,14 +176,14 @@ public class MountStateService : IMountStateService, IDisposable
         }
     }
 
-    public async Task<ActiveMount?> GetMountForDriveLetterAsync(char driveLetter)
+    public async Task<ActiveMount?> GetMountForDriveLetterAsync(char driveLetter, CancellationToken cancellationToken = default)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
 
-        await _fileLock.WaitAsync();
+        await _fileLock.WaitAsync(cancellationToken);
         try
         {
-            var mounts = await LoadMountsInternalAsync();
+            var mounts = await LoadMountsInternalAsync(cancellationToken);
             return mounts.FirstOrDefault(m =>
                 char.ToUpperInvariant(m.DriveLetter) == char.ToUpperInvariant(driveLetter));
         }
@@ -193,30 +193,30 @@ public class MountStateService : IMountStateService, IDisposable
         }
     }
 
-    public async Task<bool> IsDiskMountedAsync(int diskIndex)
+    public async Task<bool> IsDiskMountedAsync(int diskIndex, CancellationToken cancellationToken = default)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
 
-        var mount = await GetMountForDiskAsync(diskIndex);
+        var mount = await GetMountForDiskAsync(diskIndex, cancellationToken);
         return mount != null;
     }
 
-    public async Task<bool> IsDriveLetterInUseAsync(char driveLetter)
+    public async Task<bool> IsDriveLetterInUseAsync(char driveLetter, CancellationToken cancellationToken = default)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
 
-        var mount = await GetMountForDriveLetterAsync(driveLetter);
+        var mount = await GetMountForDriveLetterAsync(driveLetter, cancellationToken);
         return mount != null;
     }
 
-    public async Task<IReadOnlyList<ActiveMount>> ReconcileMountStateAsync()
+    public async Task<IReadOnlyList<ActiveMount>> ReconcileMountStateAsync(CancellationToken cancellationToken = default)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
 
-        await _fileLock.WaitAsync();
+        await _fileLock.WaitAsync(cancellationToken);
         try
         {
-            var mounts = await LoadMountsInternalAsync();
+            var mounts = await LoadMountsInternalAsync(cancellationToken);
             var orphanedMounts = new List<ActiveMount>();
             var validMounts = new List<ActiveMount>();
 
@@ -298,7 +298,7 @@ public class MountStateService : IMountStateService, IDisposable
 
             if (orphanedMounts.Count > 0)
             {
-                await SaveMountsInternalAsync(validMounts);
+                await SaveMountsInternalAsync(validMounts, cancellationToken);
                 _logger.LogInformation("Reconciliation removed {Count} orphaned mounts", orphanedMounts.Count);
             }
 
@@ -310,14 +310,14 @@ public class MountStateService : IMountStateService, IDisposable
         }
     }
 
-    public async Task ClearAllMountsAsync()
+    public async Task ClearAllMountsAsync(CancellationToken cancellationToken = default)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
 
-        await _fileLock.WaitAsync();
+        await _fileLock.WaitAsync(cancellationToken);
         try
         {
-            await SaveMountsInternalAsync(new List<ActiveMount>());
+            await SaveMountsInternalAsync(new List<ActiveMount>(), cancellationToken);
             _logger.LogInformation("Cleared all mount state");
         }
         finally
@@ -329,7 +329,7 @@ public class MountStateService : IMountStateService, IDisposable
     /// <summary>
     /// Loads mounts from JSON file. Must be called within file lock.
     /// </summary>
-    private async Task<List<ActiveMount>> LoadMountsInternalAsync()
+    private async Task<List<ActiveMount>> LoadMountsInternalAsync(CancellationToken cancellationToken = default)
     {
         if (!File.Exists(_stateFilePath))
         {
@@ -338,7 +338,7 @@ public class MountStateService : IMountStateService, IDisposable
 
         try
         {
-            var json = await File.ReadAllTextAsync(_stateFilePath);
+            var json = await File.ReadAllTextAsync(_stateFilePath, cancellationToken);
             var mounts = JsonSerializer.Deserialize(
                 json,
                 LiMountJsonContext.Default.ListActiveMount) ?? new List<ActiveMount>();
@@ -364,14 +364,14 @@ public class MountStateService : IMountStateService, IDisposable
     /// <summary>
     /// Saves mounts to JSON file. Must be called within file lock.
     /// </summary>
-    private async Task SaveMountsInternalAsync(List<ActiveMount> mounts)
+    private async Task SaveMountsInternalAsync(List<ActiveMount> mounts, CancellationToken cancellationToken = default)
     {
         try
         {
             var json = JsonSerializer.Serialize(
                 mounts,
                 LiMountJsonContext.Default.ListActiveMount);
-            await File.WriteAllTextAsync(_stateFilePath, json);
+            await File.WriteAllTextAsync(_stateFilePath, json, cancellationToken);
         }
         catch (IOException ex)
         {
