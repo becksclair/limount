@@ -1,57 +1,23 @@
-using LiMount.Core.Models;
-
 namespace LiMount.Core.Interfaces;
 
 /// <summary>
-/// Interface for executing PowerShell scripts and commands.
+/// Combined interface for executing PowerShell scripts and commands.
 /// Abstracts the execution details to enable testing and different execution strategies.
 /// </summary>
-public interface IScriptExecutor
+/// <remarks>
+/// This interface is maintained for backward compatibility.
+/// For new code, prefer using the focused interfaces:
+/// <see cref="IMountScriptService"/> for mount/unmount operations,
+/// <see cref="IDriveMappingService"/> for drive letter mapping,
+/// <see cref="IFilesystemDetectionService"/> for filesystem detection.
+/// </remarks>
+// TODO: Remove IScriptExecutor interface once all external consumers have migrated.
+// Internal code (MountOrchestrator, UnmountOrchestrator, BaseMainViewModel, tests) now uses
+// focused interfaces. Only DI registration in App.xaml.cs still registers this for
+// backward compatibility with any external code that might depend on it.
+[Obsolete("Use IMountScriptService, IDriveMappingService, or IFilesystemDetectionService for new code. This interface is maintained for backward compatibility.")]
+public interface IScriptExecutor : IMountScriptService, IDriveMappingService, IFilesystemDetectionService
 {
-    /// <summary>
-    /// Executes the PowerShell script to mount a Linux partition on the specified physical disk.
-    /// </summary>
-    /// <param name="diskIndex">Index of the physical disk to mount.</param>
-    /// <param name="partition">Partition number on the disk (1-based).</param>
-    /// <param name="fsType">Filesystem type to mount (for example, "ext4" or "xfs").</param>
-    /// <param name="distroName">Optional WSL distribution name to target; null to mount without a specific distribution.</param>
-    /// <returns>A MountResult containing details and status of the mount operation.</returns>
-    Task<MountResult> ExecuteMountScriptAsync(
-        int diskIndex,
-        int partition,
-        string fsType,
-        string? distroName = null);
-
-    /// <summary>
-    /// Executes the Map-WSLShareToDrive.ps1 script to map the specified UNC network path to a drive letter.
-    /// </summary>
-    /// <param name="driveLetter">The drive letter to assign (e.g., 'Z').</param>
-    /// <param name="targetUNC">The UNC path to map (e.g., \\server\share).</param>
-    /// <returns>A MappingResult describing the outcome of the mapping operation.</returns>
-    Task<MappingResult> ExecuteMappingScriptAsync(
-        char driveLetter,
-        string targetUNC);
-
-    /// <summary>
-    /// Executes the elevated unmount script to unmount the specified physical disk.
-    /// </summary>
-    /// <param name="diskIndex">Physical disk index to unmount.</param>
-    /// <returns>An <see cref="UnmountResult"/> indicating the outcome of the unmount operation.</returns>
-    Task<UnmountResult> ExecuteUnmountScriptAsync(int diskIndex);
-
-    /// <summary>
-    /// Unmaps the specified drive letter by executing the Unmap-DriveLetter.ps1 script.
-    /// </summary>
-    /// <param name="driveLetter">Drive letter to unmap (e.g., 'Z').</param>
-    /// <returns>The result of the unmapping operation.</returns>
-    Task<UnmappingResult> ExecuteUnmappingScriptAsync(char driveLetter);
-
-    /// <summary>
-    /// Detects the filesystem type of a partition using WSL.
-    /// Temporarily attaches the disk with --bare, runs lsblk, then detaches.
-    /// </summary>
-    /// <param name="diskIndex">Physical disk index to query.</param>
-    /// <param name="partitionNumber">Partition number (1-based).</param>
-    /// <returns>The detected filesystem type (e.g., "xfs", "ext4") or null if detection failed.</returns>
-    Task<string?> DetectFilesystemTypeAsync(int diskIndex, int partitionNumber);
+    // All methods are now inherited from the focused interfaces.
+    // This interface serves as a combined facade for backward compatibility.
 }

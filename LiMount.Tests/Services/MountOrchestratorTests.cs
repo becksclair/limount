@@ -14,14 +14,16 @@ namespace LiMount.Tests.Services;
 /// </summary>
 public class MountOrchestratorTests
 {
-    private readonly Mock<IScriptExecutor> _mockScriptExecutor;
+    private readonly Mock<IMountScriptService> _mockMountScriptService;
+    private readonly Mock<IDriveMappingService> _mockDriveMappingService;
     private readonly Mock<IMountHistoryService> _mockHistoryService;
     private readonly Mock<IOptions<LiMountConfiguration>> _mockConfig;
     private readonly MountOrchestrator _orchestrator;
 
     public MountOrchestratorTests()
     {
-        _mockScriptExecutor = new Mock<IScriptExecutor>();
+        _mockMountScriptService = new Mock<IMountScriptService>();
+        _mockDriveMappingService = new Mock<IDriveMappingService>();
         _mockHistoryService = new Mock<IMountHistoryService>();
         _mockConfig = new Mock<IOptions<LiMountConfiguration>>();
 
@@ -37,7 +39,8 @@ public class MountOrchestratorTests
         _mockConfig.Setup(c => c.Value).Returns(config);
 
         _orchestrator = new MountOrchestrator(
-            _mockScriptExecutor.Object,
+            _mockMountScriptService.Object,
+            _mockDriveMappingService.Object,
             _mockConfig.Object,
             _mockHistoryService.Object);
     }
@@ -103,8 +106,8 @@ public class MountOrchestratorTests
             Success = false,
             ErrorMessage = "WSL mount failed"
         };
-        _mockScriptExecutor
-            .Setup(e => e.ExecuteMountScriptAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
+        _mockMountScriptService
+            .Setup(e => e.ExecuteMountScriptAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(mountResult);
 
         // Act
@@ -128,8 +131,8 @@ public class MountOrchestratorTests
             MountPathLinux = "/mnt/wsl/PHYSICALDRIVE1p1",
             MountPathUNC = @"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p1"
         };
-        _mockScriptExecutor
-            .Setup(e => e.ExecuteMountScriptAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
+        _mockMountScriptService
+            .Setup(e => e.ExecuteMountScriptAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(mountResult);
 
         var mappingResult = new MappingResult
@@ -137,8 +140,8 @@ public class MountOrchestratorTests
             Success = false,
             ErrorMessage = "Drive letter already in use"
         };
-        _mockScriptExecutor
-            .Setup(e => e.ExecuteMappingScriptAsync(It.IsAny<char>(), It.IsAny<string>()))
+        _mockDriveMappingService
+            .Setup(e => e.ExecuteMappingScriptAsync(It.IsAny<char>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(mappingResult);
 
         // Act
@@ -162,8 +165,8 @@ public class MountOrchestratorTests
             MountPathLinux = "/mnt/wsl/PHYSICALDRIVE1p1",
             MountPathUNC = @"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p1"
         };
-        _mockScriptExecutor
-            .Setup(e => e.ExecuteMountScriptAsync(1, 1, "ext4", null))
+        _mockMountScriptService
+            .Setup(e => e.ExecuteMountScriptAsync(1, 1, "ext4", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(mountResult);
 
         var mappingResult = new MappingResult
@@ -172,8 +175,8 @@ public class MountOrchestratorTests
             DriveLetter = "Z",
             TargetUNC = @"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p1"
         };
-        _mockScriptExecutor
-            .Setup(e => e.ExecuteMappingScriptAsync('Z', @"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p1"))
+        _mockDriveMappingService
+            .Setup(e => e.ExecuteMappingScriptAsync('Z', @"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p1", It.IsAny<CancellationToken>()))
             .ReturnsAsync(mappingResult);
 
         // Act
@@ -201,13 +204,13 @@ public class MountOrchestratorTests
             MountPathLinux = "/mnt/wsl/PHYSICALDRIVE1p1",
             MountPathUNC = @"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p1"
         };
-        _mockScriptExecutor
-            .Setup(e => e.ExecuteMountScriptAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
+        _mockMountScriptService
+            .Setup(e => e.ExecuteMountScriptAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(mountResult);
 
         var mappingResult = new MappingResult { Success = true, DriveLetter = "Z" };
-        _mockScriptExecutor
-            .Setup(e => e.ExecuteMappingScriptAsync(It.IsAny<char>(), It.IsAny<string>()))
+        _mockDriveMappingService
+            .Setup(e => e.ExecuteMappingScriptAsync(It.IsAny<char>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(mappingResult);
 
         // Act
@@ -215,7 +218,9 @@ public class MountOrchestratorTests
 
         // Assert
         _mockHistoryService.Verify(
-            h => h.AddEntryAsync(It.Is<MountHistoryEntry>(e => e.Success && e.OperationType == MountHistoryOperationType.Mount)),
+            h => h.AddEntryAsync(
+                It.Is<MountHistoryEntry>(e => e.Success && e.OperationType == MountHistoryOperationType.Mount),
+                It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -224,8 +229,8 @@ public class MountOrchestratorTests
     {
         // Arrange
         var mountResult = new MountResult { Success = false, ErrorMessage = "Test error" };
-        _mockScriptExecutor
-            .Setup(e => e.ExecuteMountScriptAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
+        _mockMountScriptService
+            .Setup(e => e.ExecuteMountScriptAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(mountResult);
 
         // Act
@@ -233,7 +238,9 @@ public class MountOrchestratorTests
 
         // Assert
         _mockHistoryService.Verify(
-            h => h.AddEntryAsync(It.Is<MountHistoryEntry>(e => !e.Success && e.OperationType == MountHistoryOperationType.Mount)),
+            h => h.AddEntryAsync(
+                It.Is<MountHistoryEntry>(e => !e.Success && e.OperationType == MountHistoryOperationType.Mount),
+                It.IsAny<CancellationToken>()),
             Times.Once);
     }
 }

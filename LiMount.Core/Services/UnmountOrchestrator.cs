@@ -10,19 +10,26 @@ namespace LiMount.Core.Services;
 [SupportedOSPlatform("windows")]
 public class UnmountOrchestrator : IUnmountOrchestrator
 {
-    private readonly IScriptExecutor _scriptExecutor;
+    private readonly IMountScriptService _mountScriptService;
+    private readonly IDriveMappingService _driveMappingService;
     private readonly IMountHistoryService? _historyService;
 
     /// <summary>
-    /// Initializes a new instance of UnmountOrchestrator with the provided script executor.
+    /// Initializes a new instance of UnmountOrchestrator with the provided services.
     /// </summary>
-    /// <param name="scriptExecutor">The executor used to run unmapping and unmounting scripts; must not be null.</param>
+    /// <param name="mountScriptService">Service for executing unmount scripts.</param>
+    /// <param name="driveMappingService">Service for drive letter unmapping operations.</param>
     /// <param name="historyService">Optional history service for tracking unmount operations.</param>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="scriptExecutor"/> is null.</exception>
-    public UnmountOrchestrator(IScriptExecutor scriptExecutor, IMountHistoryService? historyService = null)
+    /// <exception cref="ArgumentNullException">Thrown when required parameters are null.</exception>
+    public UnmountOrchestrator(
+        IMountScriptService mountScriptService,
+        IDriveMappingService driveMappingService,
+        IMountHistoryService? historyService = null)
     {
-        ArgumentNullException.ThrowIfNull(scriptExecutor);
-        _scriptExecutor = scriptExecutor;
+        ArgumentNullException.ThrowIfNull(mountScriptService);
+        ArgumentNullException.ThrowIfNull(driveMappingService);
+        _mountScriptService = mountScriptService;
+        _driveMappingService = driveMappingService;
         _historyService = historyService;
     }
 
@@ -32,11 +39,13 @@ public class UnmountOrchestrator : IUnmountOrchestrator
     /// <param name="diskIndex">Index of the disk to unmount from WSL.</param>
     /// <param name="driveLetter">Optional drive letter to unmap before unmounting; pass null to skip unmapping.</param>
     /// <param name="progress">Optional progress reporter that receives status messages.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>An UnmountAndUnmapResult indicating success (including disk index and optional drive letter) or failure (including disk index, an error message, and the failed operation identifier). The returned drive letter (if any) is only populated when the unmapping operation succeeds. If unmapping fails but unmounting succeeds, the result will have Success = false with FailedStep = "unmap" to indicate the workflow did not complete successfully.</returns>
     public async Task<UnmountAndUnmapResult> UnmountAndUnmapAsync(
         int diskIndex,
         char? driveLetter = null,
-        IProgress<string>? progress = null)
+        IProgress<string>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         // Validate parameters
         if (diskIndex < 0)
@@ -60,7 +69,7 @@ public class UnmountOrchestrator : IUnmountOrchestrator
         {
             progress?.Report($"Unmapping drive letter {driveLetter}:...");
 
-            var unmappingResult = await _scriptExecutor.ExecuteUnmappingScriptAsync(driveLetter.Value);
+            var unmappingResult = await _driveMappingService.ExecuteUnmappingScriptAsync(driveLetter.Value, cancellationToken);
 
             if (!unmappingResult.Success)
             {
@@ -79,7 +88,7 @@ public class UnmountOrchestrator : IUnmountOrchestrator
         // Step 2: Unmount from WSL
         progress?.Report("Unmounting disk from WSL...");
 
-        var unmountResult = await _scriptExecutor.ExecuteUnmountScriptAsync(diskIndex);
+        var unmountResult = await _mountScriptService.ExecuteUnmountScriptAsync(diskIndex, cancellationToken);
 
         if (!unmountResult.Success)
         {
@@ -90,7 +99,7 @@ public class UnmountOrchestrator : IUnmountOrchestrator
                 "unmount");
 
             // Log failure to history (best-effort)
-            await LogToHistoryAsync(failureResult);
+            await LogToHistoryAsync(failureResult, cancellationToken);
 
             return failureResult;
         }
@@ -116,7 +125,7 @@ public class UnmountOrchestrator : IUnmountOrchestrator
         }
 
         // Log to history (best-effort)
-        await LogToHistoryAsync(result);
+        await LogToHistoryAsync(result, cancellationToken);
 
         return result;
     }
@@ -126,14 +135,15 @@ public class UnmountOrchestrator : IUnmountOrchestrator
     /// Exceptions from the history service are caught and logged but do not fail the operation.
     /// </summary>
     /// <param name="result">The result to log to history.</param>
-    private async Task LogToHistoryAsync(UnmountAndUnmapResult result)
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    private async Task LogToHistoryAsync(UnmountAndUnmapResult result, CancellationToken cancellationToken = default)
     {
         if (_historyService == null) return;
 
         try
         {
             var historyEntry = MountHistoryEntry.FromUnmountResult(result);
-            await _historyService.AddEntryAsync(historyEntry);
+            await _historyService.AddEntryAsync(historyEntry, cancellationToken);
         }
         catch (Exception ex)
         {
