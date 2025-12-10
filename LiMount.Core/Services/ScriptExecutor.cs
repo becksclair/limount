@@ -22,12 +22,15 @@ namespace LiMount.Core.Services;
 /// </remarks>
 [SupportedOSPlatform("windows")]
 #pragma warning disable CS0618 // IScriptExecutor is obsolete - intentionally implementing for backward compatibility
-public class ScriptExecutor : IMountScriptService, IDriveMappingService, IFilesystemDetectionService, IScriptExecutor
+public partial class ScriptExecutor : IMountScriptService, IDriveMappingService, IFilesystemDetectionService, IScriptExecutor
 #pragma warning restore CS0618
 {
     // Compiled regex patterns for efficient parsing of lsblk output
-    private static readonly Regex NameRegex = new(@"NAME=""([^""]+)""", RegexOptions.Compiled);
-    private static readonly Regex FsTypeRegex = new(@"FSTYPE=""([^""]*)""", RegexOptions.Compiled);
+    [GeneratedRegex(@"NAME=""([^""]+)""", RegexOptions.Compiled)]
+    private static partial Regex NameRegex();
+
+    [GeneratedRegex(@"FSTYPE=""([^""]*)""", RegexOptions.Compiled)]
+    private static partial Regex FsTypeRegex();
 
     private readonly string _scriptsPath;
     private readonly ILogger<ScriptExecutor>? _logger;
@@ -677,8 +680,8 @@ public class ScriptExecutor : IMountScriptService, IDriveMappingService, IFilesy
             if (line.Contains("NAME=\"") && line.Contains("FSTYPE=\""))
             {
                 // Extract NAME and FSTYPE using pre-compiled static regex patterns
-                var nameMatch = NameRegex.Match(line);
-                var fsTypeMatch = FsTypeRegex.Match(line);
+                var nameMatch = NameRegex().Match(line);
+                var fsTypeMatch = FsTypeRegex().Match(line);
 
                 if (nameMatch.Success && fsTypeMatch.Success)
                 {
