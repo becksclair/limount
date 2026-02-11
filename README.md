@@ -153,6 +153,17 @@ Use this only on a machine with admin privileges and an explicitly chosen test d
 powershell -ExecutionPolicy Bypass -File .\scripts\run-hil-mount-test.ps1 -DiskIndex 1 -Partition 2 -ExpectXfsUnsupported
 ```
 
+Drive-level verification (expected failure on one partition + required successful mount/unmount on another):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-hil-mount-test.ps1 -DiskIndex 1 -VerifyDriveEndToEnd -FailurePartition 2
+```
+
+Notes:
+- The HIL runner sets `LIMOUNT_REQUIRE_HIL=1` so tests fail instead of silently skipping.
+- Default behavior validates the normal elevated script path (`LIMOUNT_SKIP_SCRIPT_ELEVATION=0`).
+- Use `-SkipScriptElevation` only in environments where direct non-elevated `wsl --mount` is allowed.
+
 ## Usage
 
 ### Basic Workflow
@@ -207,6 +218,17 @@ STATUS=OK
 DistroName=Ubuntu
 MountPathLinux=/mnt/wsl/PHYSICALDRIVE2p1
 MountPathUNC=\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE2p1
+AlreadyMounted=false
+UncVerified=true
+```
+
+Failure output may include:
+```text
+STATUS=ERROR
+ErrorMessage=...
+ErrorCode=XFS_UNSUPPORTED_FEATURES
+ErrorHint=This XFS filesystem uses features unsupported by the current WSL kernel...
+DmesgSummary=...
 ```
 
 **Example**:
@@ -271,12 +293,10 @@ MappedTo=\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE2p1
 
 This is an MVP/prototype with the following limitations:
 
-- **Minimal Error Recovery**: Error handling is basic; failed mounts may require manual cleanup
-- **Limited Unmount Feature**: Basic unmount functionality available but may require manual cleanup in some cases
 - **Single Distro Support**: Auto-detects the first WSL distro; multi-distro scenarios may need manual specification
 - **Windows 11 Preferred**: `wsl --mount` works best on Windows 11 Build 22000+; older builds may have limited support
-- **No Persistence**: Drive mappings are session-based and may not survive reboots
-- **Limited Testing**: Tested primarily with ext4; other filesystems may behave differently
+- **Kernel Compatibility Limits**: Some XFS/ext* feature sets may still be unsupported by the installed WSL kernel
+- **No VM Fallback Yet**: Native Linux VM fallback for unsupported filesystems is not yet implemented
 
 ## Troubleshooting
 
@@ -295,6 +315,12 @@ Validate kernel support from WSL:
 wsl -e sh -lc "dmesg | tail -n 200"
 ```
 
+If you see messages similar to:
+- `XFS ... Superblock has unknown incompatible features`
+- `Filesystem cannot be safely mounted by this kernel`
+
+then this is a kernel/filesystem compatibility limitation, not a drive-letter mapping bug.
+
 ### "Disk X is a system or boot disk"
 
 - LiMount refuses to mount system/boot disks for safety
@@ -310,7 +336,18 @@ wsl -e sh -lc "dmesg | tail -n 200"
 
 - Refresh Explorer (F5)
 - Try a different drive letter
-- Verify the mapping: `net use` in Command Prompt
+- Verify `subst` mapping in the current user context: `subst`
+- Verify UNC accessibility directly: `Test-Path \\wsl.localhost\<Distro>\mnt\wsl\PHYSICALDRIVEXpY`
+
+### App says a disk is mounted, but unmount fails with `ERROR_FILE_NOT_FOUND`
+
+LiMount now treats WSL detach-file-not-found responses as an already-detached success path during unmount cleanup. If this appears in older builds, upgrade and retry.
+
+### App detects mount state incorrectly after a failed mount attempt
+
+LiMount now checks the live WSL mount table (`mount`) instead of relying on directory listing under `/mnt/wsl`, and it attempts best-effort cleanup of stale `PHYSICALDRIVE*p*` directories.
+
+For full incident details and validation evidence, see `docs/incidents/2026-02-11-wsl-xfs-mount-regression.md`.
 
 ## Contributing
 

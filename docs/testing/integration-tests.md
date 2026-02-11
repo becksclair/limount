@@ -103,6 +103,19 @@ Notes:
 - The runner sets `LIMOUNT_SKIP_SCRIPT_ELEVATION=0` by default, so it validates the normal elevated script path.
 - Use `-SkipScriptElevation` only when direct non-elevated `wsl --mount` is allowed in your environment.
 
+### Recent Regression Validation (February 11, 2026)
+
+This workflow was validated on a real disk with two partitions:
+
+- `Disk 1, Partition 2`: expected failure (`XFS_UNSUPPORTED_FEATURES`) due to unsupported XFS kernel features in WSL.
+- `Disk 1, Partition 1`: required success path (mount + UNC access + unmount) completed.
+
+Use this exact command to reproduce the combined validation:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-hil-mount-test.ps1 -DiskIndex 1 -VerifyDriveEndToEnd -FailurePartition 2
+```
+
 ---
 
 ## Integration Test Scenarios
@@ -560,7 +573,7 @@ Due to Windows-specific dependencies, these scenarios are NOT covered by automat
 | Scenario | Reason | Mitigation |
 |----------|--------|------------|
 | WMI disk enumeration | Requires Windows WMI | Manual testing on Windows |
-| PowerShell elevation (UAC) | Can't automate UAC prompts | Manual testing with UAC |
+| PowerShell elevation (UAC) | Fully unattended UAC automation is still limited | Use HIL runner defaults for elevated path, or `-SkipScriptElevation` only in controlled environments |
 | WSL mount/unmount | Requires actual WSL2 | Manual testing with WSL |
 | Drive letter mapping | Windows-specific API | Manual testing on Windows |
 | UNC path accessibility | Requires WSL running | Manual testing with WSL |
@@ -609,7 +622,8 @@ wsl -e sudo mkfs.ext4 /dev/sdX1  # Replace X with appropriate letter
 
 #### Option 3: Docker Desktop with WSL2 Backend
 
-Docker Desktop includes WSL2, which can be used for testing WSL integration.
+Docker Desktop is not a workaround for unsupported WSL filesystem features because it typically uses the same WSL kernel path.
+For filesystem-compatibility fallback testing, prefer a full Linux VM.
 
 ---
 
@@ -657,12 +671,12 @@ As the project matures, consider:
 1. **Self-Hosted Windows Runner**: For automated integration tests
 2. **Docker-based Testing**: Use Docker Desktop + WSL2 for reproducible environment
 3. **Pester Test Suite**: PowerShell script testing
-4. **UI Automation**: Windows Application Driver for WPF testing
+4. **UI Automation**: Expand FlaUI coverage for WinUI 3 flows (including recovery/error UX)
 5. **Performance Benchmarks**: Track mount/unmount operation times
 6. **Compatibility Matrix**: Test on Windows 10 vs. 11, different WSL versions
 
 ---
 
-**Last Updated**: 2025-11-18
+**Last Updated**: 2026-02-11
 **Maintained By**: Development Team
 **Review Cycle**: Before each release

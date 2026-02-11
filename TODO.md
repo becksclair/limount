@@ -87,3 +87,15 @@ The regression was not a single bug. It was a coupled reliability issue across s
 - Filesystem detection was corrected to be disk-identity aware, preventing cross-disk partition-number mismatches.
 - Deterministic app-level UI automation was added (`LiMount.UITests`) with `LIMOUNT_TEST_MODE` and scenario injection, plus optional screenshot capture.
 - Real hardware-in-loop helper script was added (`scripts/run-hil-mount-test.ps1`) to validate this exact class of regression on local Windows + WSL.
+- Startup false-positive mount detection was fixed by switching from `/mnt/wsl` directory listing checks to live mount-table checks, with best-effort stale directory cleanup.
+- Unmount flow now treats WSL detach `ERROR_FILE_NOT_FOUND` / `Wsl/Service/DetachDisk` responses as already-detached success for cleanup correctness.
+- Mapping verification was hardened to normalize UNC forms reported by `subst` (including `UNC\...`) to avoid false failures.
+
+## Session Verification Evidence (February 11, 2026)
+- `dotnet test LiMount.Tests` passed (`284` tests).
+- `dotnet test LiMount.UITests` passed (`2` tests) with actionable status assertions for unsupported-XFS and success scenarios.
+- HIL expected-failure scenario passed for unsupported partition:
+  - `powershell -ExecutionPolicy Bypass -File .\scripts\run-hil-mount-test.ps1 -DiskIndex 1 -Partition 2 -ExpectXfsUnsupported`
+- HIL drive-level verification passed:
+  - `powershell -ExecutionPolicy Bypass -File .\scripts\run-hil-mount-test.ps1 -DiskIndex 1 -VerifyDriveEndToEnd -FailurePartition 2`
+  - Expected failure on partition 2 and successful mount+unmount on partition 1 were both confirmed.

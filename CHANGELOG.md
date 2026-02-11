@@ -9,15 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Mount functionality**: Mount Linux disk partitions into WSL2 with `wsl --mount`
-- **Drive mapping**: Map WSL UNC paths to Windows drive letters
-- **Unmount functionality**: Safely unmount disks and unmap drive letters
-- **Environment validation**: Startup checks for WSL, distros, and Windows version
-- **Mount state tracking**: Persistent JSON storage of active mounts
-- **Mount history**: Track all mount/unmount operations with timestamps
-- **History window**: View past mount operations
-- **Configuration**: `appsettings.json` with configurable timeouts and retries
-- **Logging**: Serilog file logging to `%LocalAppData%\LiMount\logs\`
+- Mount-script diagnostic contract fields: `ErrorCode`, `ErrorHint`, `DmesgSummary`, `AlreadyMounted`, `UncVerified`
+- Deterministic UI automation project (`LiMount.UITests`) with WinUI test mode scenarios and optional screenshot capture
+- Hardware-in-loop helper script: `scripts/run-hil-mount-test.ps1`
+- Partition-scoped mount state APIs (`GetMountForDiskPartitionAsync`, `GetMountsForDiskAsync`, partition-specific unregister)
+- Dedicated UNC existence timeout configuration: `UncExistenceCheckTimeoutMs`
+
+### Changed
+
+- Release publish profiles now disable trimming (`PublishTrimmed=false`) for reliability
+- Filesystem detection uses disk-aware `lsblk` snapshot comparison (`NAME,PKNAME,FSTYPE`) rather than partition suffix matching
+- Startup mount detection now checks live WSL mount table output instead of directory listing heuristics
+- Mount orchestration retries failed explicit filesystem mounts once with `fsType=auto`
+- Mapping verification now normalizes UNC variants (including `UNC\...` forms reported by `subst`)
+
+### Fixed
+
+- Fixed incorrect WSL distro-list invocation path (`wsl -l -q` now uses raw arguments, not `wsl -e -l -q`)
+- Fixed false “already mounted” state caused by stale `/mnt/wsl/PHYSICALDRIVE*p*` directories
+- Fixed unmount cleanup failures when WSL returns `Wsl/Service/DetachDisk/ERROR_FILE_NOT_FOUND` (treated as already detached)
+- Fixed elevated `subst` verification failures from path-format mismatches
+- Fixed rollback behavior to avoid unmounting mounts that existed before the current operation
+
+### Validation
+
+- Real-system HIL verification completed:
+  - expected failure path validated for unsupported XFS root partition (`XFS_UNSUPPORTED_FEATURES`)
+  - successful mount + unmount validated on an alternate partition on the same physical disk
+- Full test suite passed (`dotnet test LiMount.Tests`)
 
 ### Architecture
 
@@ -28,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Technical
 
-- .NET 8 WPF application (Windows-only)
+- .NET 10 WinUI 3 application (Windows-only)
 - System.Management for WMI disk enumeration
 - Microsoft.Extensions.DependencyInjection for IoC
 - xUnit + Moq + FluentAssertions for testing
