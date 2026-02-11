@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Threading;
 using FluentAssertions;
 using LiMount.Core.Configuration;
 using LiMount.Core.Interfaces;
@@ -13,7 +14,6 @@ namespace LiMount.Tests.Integration;
 /// Integration tests for mounting real Linux drives.
 /// These tests require:
 /// - A physical Linux-formatted drive connected to the system
-/// - Administrator privileges
 /// - WSL2 installed and configured
 ///
 /// Set LIMOUNT_TEST_DISK_INDEX environment variable to specify the disk to test.
@@ -23,12 +23,13 @@ namespace LiMount.Tests.Integration;
 public class MountIntegrationTests : IAsyncLifetime
 {
     private readonly ScriptExecutor _scriptExecutor;
-    private readonly IDiskEnumerationService _diskService;
-    private readonly IMountOrchestrator _mountOrchestrator;
-    private readonly IUnmountOrchestrator _unmountOrchestrator;
+    private readonly DiskEnumerationService _diskService;
+    private readonly MountOrchestrator _mountOrchestrator;
+    private readonly UnmountOrchestrator _unmountOrchestrator;
     private readonly IMountHistoryService _historyService;
     private readonly int? _testDiskIndex;
-    private readonly int _testPartition = 1;
+    private readonly int _testPartition;
+    private readonly bool _requireHilExecution;
     private char? _mappedDriveLetter;
 
     public MountIntegrationTests()
@@ -73,6 +74,16 @@ public class MountIntegrationTests : IAsyncLifetime
             var linuxDisk = candidates.FirstOrDefault(d => d.HasLinuxPartitions);
             _testDiskIndex = linuxDisk?.Index;
         }
+
+        var envPartition = Environment.GetEnvironmentVariable("LIMOUNT_TEST_PARTITION");
+        _testPartition = int.TryParse(envPartition, out var partition) && partition > 0
+            ? partition
+            : 1;
+
+        _requireHilExecution = string.Equals(
+            Environment.GetEnvironmentVariable("LIMOUNT_REQUIRE_HIL"),
+            "1",
+            StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task InitializeAsync()
@@ -92,13 +103,26 @@ public class MountIntegrationTests : IAsyncLifetime
                     RedirectStandardError = true
                 };
                 using var process = Process.Start(psi);
-                process?.WaitForExit(5000);
+                if (process != null)
+                {
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    try
+                    {
+                        await process.WaitForExitAsync(cts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Timed out; continue best-effort
+                    }
+                }
             }
             catch
             {
                 // Ignore errors - disk may not be mounted
             }
         }
+
+        await Task.CompletedTask;
     }
 
     public async Task DisposeAsync()
@@ -127,22 +151,22 @@ public class MountIntegrationTests : IAsyncLifetime
                     using var process = Process.Start(psi);
                     process?.WaitForExit(5000);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine(ex);
+                }
             }
         }
     }
 
-    private bool CanRunTests()
+    private bool CanRunTests(out string reason)
     {
         // Check if we have a test disk
         if (!_testDiskIndex.HasValue)
+        {
+            reason = "No test disk index resolved.";
             return false;
-
-        // Check if running as admin
-        var principal = new System.Security.Principal.WindowsPrincipal(
-            System.Security.Principal.WindowsIdentity.GetCurrent());
-        if (!principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator))
-            return false;
+        }
 
         // Check if WSL is available
         try
@@ -156,10 +180,18 @@ public class MountIntegrationTests : IAsyncLifetime
                 CreateNoWindow = true
             });
             process?.WaitForExit(5000);
-            return process?.ExitCode == 0;
+            if (process?.ExitCode != 0)
+            {
+                reason = "wsl.exe --status failed.";
+                return false;
+            }
+
+            reason = string.Empty;
+            return true;
         }
         catch
         {
+            reason = "Unable to execute wsl.exe --status.";
             return false;
         }
     }
@@ -187,17 +219,23 @@ public class MountIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task FullMountWorkflow_MountsListsAndUnmounts()
     {
-        if (!CanRunTests())
+        if (!CanRunTests(out var skipReason))
         {
-            Console.WriteLine("Skipping: Prerequisites not met (need admin + WSL + test disk)");
+            if (_requireHilExecution)
+            {
+                throw new InvalidOperationException($"HIL execution was required but prerequisites were not met: {skipReason}");
+            }
+
+            Console.WriteLine($"Skipping: Prerequisites not met ({skipReason})");
             return;
         }
 
-        Console.WriteLine($"Testing with disk index: {_testDiskIndex}");
+        Console.WriteLine($"Testing with disk index: {_testDiskIndex}, partition: {_testPartition}");
 
         // Step 1: Find a free drive letter
         var driveLetterService = new DriveLetterService();
-        var freeLetter = driveLetterService.GetFreeLetters().FirstOrDefault();
+        var freeLetters = driveLetterService.GetFreeLetters();
+        var freeLetter = freeLetters.Count > 0 ? freeLetters[0] : '\0';
         freeLetter.Should().NotBe('\0', "Should have a free drive letter");
         Console.WriteLine($"Using drive letter: {freeLetter}:");
 
@@ -212,13 +250,29 @@ public class MountIntegrationTests : IAsyncLifetime
             null,
             progress);
 
+        var expectXfsUnsupported = string.Equals(
+            Environment.GetEnvironmentVariable("LIMOUNT_EXPECT_XFS_UNSUPPORTED"),
+            "1",
+            StringComparison.OrdinalIgnoreCase);
+
+        if (expectXfsUnsupported)
+        {
+            result.Success.Should().BeFalse("Expected unsupported XFS mount failure for this HIL scenario");
+            result.ErrorMessage.Should().Contain("XFS filesystem uses features unsupported by the current WSL kernel");
+            (result.ErrorMessage?.Contains("XFS_UNSUPPORTED_FEATURES", StringComparison.OrdinalIgnoreCase) == true ||
+             result.ErrorMessage?.Contains("Invalid argument", StringComparison.OrdinalIgnoreCase) == true)
+                .Should().BeTrue("Expected the unsupported-XFS failure to include a diagnostic code or kernel mount error details");
+            return;
+        }
+
         result.Success.Should().BeTrue($"Mount should succeed. Error: {result.ErrorMessage}");
         result.DriveLetter.Should().Be(freeLetter);
         result.MountPathUNC.Should().NotBeNullOrEmpty("Should have UNC path");
         Console.WriteLine($"Mounted at: {result.MountPathUNC}");
 
         _mappedDriveLetter = freeLetter;
-        
+        var mountMarker = $"PHYSICALDRIVE{_testDiskIndex!.Value}p{_testPartition}";
+
         // Use UNC path for verification since elevated tests can't see user-context subst mappings
         var uncPath = result.MountPathUNC!;
 
@@ -240,20 +294,65 @@ public class MountIntegrationTests : IAsyncLifetime
             Console.WriteLine($"  ... and {entries.Count - 10} more");
         }
 
-        // Step 5: Unmount
+        // Step 5: Verify WSL mount table includes this partition
+        var mountTableAfterMount = await RunProcessForOutputAsync(
+            "wsl.exe",
+            "-e sh -lc \"mount | grep -i '/mnt/wsl/PHYSICALDRIVE' || true\"",
+            TimeSpan.FromSeconds(10));
+        mountTableAfterMount.Should().Contain(mountMarker,
+            "WSL mount table should contain mounted partition marker after successful mount");
+
+        // Step 6: Unmount
         Console.WriteLine("Unmounting...");
         var unmountResult = await _unmountOrchestrator.UnmountAndUnmapAsync(
             _testDiskIndex!.Value,
             freeLetter);
         unmountResult.Success.Should().BeTrue($"Unmount should succeed. Error: {unmountResult.ErrorMessage}");
 
-        // Step 6: Verify UNC path is gone (WSL mount removed)
+        // Step 7: Verify UNC path is gone (WSL mount removed)
         Console.WriteLine("Verifying drive is unmounted...");
         // Give WSL time to clean up
         await Task.Delay(500);
-        Directory.Exists(uncPath).Should().BeFalse("UNC path should not exist after unmount");
+        var uncExistsAfterUnmount = Directory.Exists(uncPath);
+        Console.WriteLine($"UNC path still exists after unmount: {uncExistsAfterUnmount}");
+
+        var mountTableAfterUnmount = await RunProcessForOutputAsync(
+            "wsl.exe",
+            "-e sh -lc \"mount | grep -i '/mnt/wsl/PHYSICALDRIVE' || true\"",
+            TimeSpan.FromSeconds(10));
+        mountTableAfterUnmount.Should().NotContain(mountMarker,
+            "WSL mount table should not contain partition marker after unmount");
 
         _mappedDriveLetter = null; // Cleanup done
         Console.WriteLine("Full workflow completed successfully!");
+    }
+
+    private static async Task<string> RunProcessForOutputAsync(string fileName, string arguments, TimeSpan timeout)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = fileName,
+                Arguments = arguments,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+
+        process.Start();
+        using var cts = new CancellationTokenSource(timeout);
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(cts.Token);
+        var stderrTask = process.StandardError.ReadToEndAsync(cts.Token);
+        await process.WaitForExitAsync(cts.Token);
+
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
+        return string.IsNullOrWhiteSpace(stderr)
+            ? stdout
+            : $"{stdout}{Environment.NewLine}{stderr}";
     }
 }

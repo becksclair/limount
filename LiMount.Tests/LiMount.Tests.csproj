@@ -8,6 +8,7 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
@@ -35,7 +36,6 @@
   <ItemGroup>
     <!-- Reference to the projects being tested -->
     <ProjectReference Include="..\LiMount.Core\LiMount.Core.csproj" />
-    <ProjectReference Include="..\LiMount.App\LiMount.App.csproj" />
     <ProjectReference Include="..\LiMount.WinUI\LiMount.WinUI.csproj" />
   </ItemGroup>
 

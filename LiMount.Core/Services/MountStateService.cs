@@ -82,15 +82,17 @@ public class MountStateService : IMountStateService, IDisposable
     {
         if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
 
-        await _fileLock.WaitAsync(cancellationToken);
+        bool acquired = false;
         try
         {
+            await _fileLock.WaitAsync(cancellationToken);
+            acquired = true;
             var mounts = await LoadMountsInternalAsync(cancellationToken);
             return mounts.AsReadOnly();
         }
         finally
         {
-            _fileLock.Release();
+            if (acquired) _fileLock.Release();
         }
     }
 
@@ -100,13 +102,15 @@ public class MountStateService : IMountStateService, IDisposable
 
         if (mount == null) throw new ArgumentNullException(nameof(mount));
 
-        await _fileLock.WaitAsync(cancellationToken);
+        bool acquired = false;
         try
         {
+            await _fileLock.WaitAsync(cancellationToken);
+            acquired = true;
             var mounts = await LoadMountsInternalAsync(cancellationToken);
 
-            // Remove any existing mount for this disk
-            mounts.RemoveAll(m => m.DiskIndex == mount.DiskIndex);
+            // Remove any existing mount for this specific partition (allows multi-partition per disk)
+            mounts.RemoveAll(m => m.DiskIndex == mount.DiskIndex && m.PartitionNumber == mount.PartitionNumber);
 
             // Create a copy of the mount with timestamps and verification status
             var mountCopy = new ActiveMount
@@ -118,9 +122,9 @@ public class MountStateService : IMountStateService, IDisposable
                 DistroName = mount.DistroName,
                 MountPathLinux = mount.MountPathLinux,
                 MountPathUNC = mount.MountPathUNC,
-                MountedAt = DateTime.Now,
+                MountedAt = DateTime.UtcNow,
                 IsVerified = true,
-                LastVerified = DateTime.Now
+                LastVerified = DateTime.UtcNow
             };
 
             // Add new mount
@@ -134,29 +138,61 @@ public class MountStateService : IMountStateService, IDisposable
         }
         finally
         {
-            _fileLock.Release();
+            if (acquired) _fileLock.Release();
         }
     }
 
+    [Obsolete("Use UnregisterDiskAsync for disk-wide removal or UnregisterMountAsync(diskIndex, partition) for partition-scoped removal.")]
     public async Task UnregisterMountAsync(int diskIndex, CancellationToken cancellationToken = default)
+    {
+        await UnregisterDiskAsync(diskIndex, cancellationToken);
+    }
+
+    public async Task UnregisterMountAsync(int diskIndex, int partition, CancellationToken cancellationToken = default)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
 
-        await _fileLock.WaitAsync(cancellationToken);
+        bool acquired = false;
         try
         {
+            await _fileLock.WaitAsync(cancellationToken);
+            acquired = true;
+            var mounts = await LoadMountsInternalAsync(cancellationToken);
+            var removed = mounts.RemoveAll(m => m.DiskIndex == diskIndex && m.PartitionNumber == partition);
+
+            if (removed > 0)
+            {
+                await SaveMountsInternalAsync(mounts, cancellationToken);
+                _logger.LogInformation("Unregistered mount for disk {DiskIndex} partition {Partition}", diskIndex, partition);
+            }
+        }
+        finally
+        {
+            if (acquired) _fileLock.Release();
+        }
+    }
+
+    public async Task UnregisterDiskAsync(int diskIndex, CancellationToken cancellationToken = default)
+    {
+        if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
+
+        bool acquired = false;
+        try
+        {
+            await _fileLock.WaitAsync(cancellationToken);
+            acquired = true;
             var mounts = await LoadMountsInternalAsync(cancellationToken);
             var removed = mounts.RemoveAll(m => m.DiskIndex == diskIndex);
 
             if (removed > 0)
             {
                 await SaveMountsInternalAsync(mounts, cancellationToken);
-                _logger.LogInformation("Unregistered mount for disk {DiskIndex}", diskIndex);
+                _logger.LogInformation("Unregistered {Count} mount(s) for disk {DiskIndex}", removed, diskIndex);
             }
         }
         finally
         {
-            _fileLock.Release();
+            if (acquired) _fileLock.Release();
         }
     }
 
@@ -164,15 +200,53 @@ public class MountStateService : IMountStateService, IDisposable
     {
         if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
 
-        await _fileLock.WaitAsync(cancellationToken);
+        bool acquired = false;
         try
         {
+            await _fileLock.WaitAsync(cancellationToken);
+            acquired = true;
             var mounts = await LoadMountsInternalAsync(cancellationToken);
             return mounts.FirstOrDefault(m => m.DiskIndex == diskIndex);
         }
         finally
         {
-            _fileLock.Release();
+            if (acquired) _fileLock.Release();
+        }
+    }
+
+    public async Task<ActiveMount?> GetMountForDiskPartitionAsync(int diskIndex, int partition, CancellationToken cancellationToken = default)
+    {
+        if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
+
+        bool acquired = false;
+        try
+        {
+            await _fileLock.WaitAsync(cancellationToken);
+            acquired = true;
+            var mounts = await LoadMountsInternalAsync(cancellationToken);
+            return mounts.FirstOrDefault(m => m.DiskIndex == diskIndex && m.PartitionNumber == partition);
+        }
+        finally
+        {
+            if (acquired) _fileLock.Release();
+        }
+    }
+
+    public async Task<IReadOnlyList<ActiveMount>> GetMountsForDiskAsync(int diskIndex, CancellationToken cancellationToken = default)
+    {
+        if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
+
+        bool acquired = false;
+        try
+        {
+            await _fileLock.WaitAsync(cancellationToken);
+            acquired = true;
+            var mounts = await LoadMountsInternalAsync(cancellationToken);
+            return mounts.Where(m => m.DiskIndex == diskIndex).ToList().AsReadOnly();
+        }
+        finally
+        {
+            if (acquired) _fileLock.Release();
         }
     }
 
@@ -180,16 +254,18 @@ public class MountStateService : IMountStateService, IDisposable
     {
         if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
 
-        await _fileLock.WaitAsync(cancellationToken);
+        bool acquired = false;
         try
         {
+            await _fileLock.WaitAsync(cancellationToken);
+            acquired = true;
             var mounts = await LoadMountsInternalAsync(cancellationToken);
             return mounts.FirstOrDefault(m =>
                 char.ToUpperInvariant(m.DriveLetter) == char.ToUpperInvariant(driveLetter));
         }
         finally
         {
-            _fileLock.Release();
+            if (acquired) _fileLock.Release();
         }
     }
 
@@ -197,8 +273,8 @@ public class MountStateService : IMountStateService, IDisposable
     {
         if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
 
-        var mount = await GetMountForDiskAsync(diskIndex, cancellationToken);
-        return mount != null;
+        var mounts = await GetMountsForDiskAsync(diskIndex, cancellationToken);
+        return mounts.Count > 0;
     }
 
     public async Task<bool> IsDriveLetterInUseAsync(char driveLetter, CancellationToken cancellationToken = default)
@@ -213,9 +289,11 @@ public class MountStateService : IMountStateService, IDisposable
     {
         if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
 
-        await _fileLock.WaitAsync(cancellationToken);
+        bool acquired = false;
         try
         {
+            await _fileLock.WaitAsync(cancellationToken);
+            acquired = true;
             var mounts = await LoadMountsInternalAsync(cancellationToken);
             var orphanedMounts = new List<ActiveMount>();
             var validMounts = new List<ActiveMount>();
@@ -278,7 +356,7 @@ public class MountStateService : IMountStateService, IDisposable
             // Phase 3: Update verified status based on actual verification results
             // - Mounts with UNC paths: verified only if UNC is accessible
             // - Mounts without UNC paths: verified based on drive letter check (already passed Phase 1)
-            var now = DateTime.Now;
+            var now = DateTime.UtcNow;
             foreach (var mount in validMounts)
             {
                 if (!string.IsNullOrEmpty(mount.MountPathUNC))
@@ -306,7 +384,7 @@ public class MountStateService : IMountStateService, IDisposable
         }
         finally
         {
-            _fileLock.Release();
+            if (acquired) _fileLock.Release();
         }
     }
 
@@ -314,15 +392,17 @@ public class MountStateService : IMountStateService, IDisposable
     {
         if (_disposed) throw new ObjectDisposedException(nameof(MountStateService));
 
-        await _fileLock.WaitAsync(cancellationToken);
+        bool acquired = false;
         try
         {
+            await _fileLock.WaitAsync(cancellationToken);
+            acquired = true;
             await SaveMountsInternalAsync(new List<ActiveMount>(), cancellationToken);
             _logger.LogInformation("Cleared all mount state");
         }
         finally
         {
-            _fileLock.Release();
+            if (acquired) _fileLock.Release();
         }
     }
 

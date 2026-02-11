@@ -1,3 +1,4 @@
+using System.Threading;
 using Moq;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
@@ -66,18 +67,24 @@ public class MainViewModelTests
 
     private MainViewModel CreateViewModel()
     {
-        return new MainViewModel(
+        var mountingServices = new MainViewModel.MountingServices(
             _mockDiskService.Object,
             _mockDriveLetterService.Object,
             _mockMountOrchestrator.Object,
             _mockUnmountOrchestrator.Object,
             _mockMountStateService.Object,
+            _mockFilesystemDetectionService.Object);
+
+        var appServices = new MainViewModel.AppServices(
             _mockEnvValidation.Object,
-            _mockFilesystemDetectionService.Object,
             _mockDialogService.Object,
-            () => null!, // HistoryWindow factory - not used in tests
             _mockLogger.Object,
-            _mockConfig.Object,
+            _mockConfig.Object);
+
+        return new MainViewModel(
+            mountingServices,
+            appServices,
+            () => null!, // HistoryWindow factory - not used in tests
             _mockUiDispatcher.Object);
     }
 
@@ -107,12 +114,12 @@ public class MainViewModelTests
     {
         // Arrange
         _mockEnvValidation
-            .Setup(v => v.ValidateEnvironmentAsync())
+            .Setup(v => v.ValidateEnvironmentAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EnvironmentValidationResult
             {
                 IsValid = false,
-                Errors = new List<string> { "WSL not installed" },
-                Suggestions = new List<string> { "Install WSL 2" }
+                Errors = ["WSL not installed"],
+                Suggestions = ["Install WSL 2"]
             });
 
         var vm = CreateViewModel();
@@ -130,18 +137,15 @@ public class MainViewModelTests
     public async Task InitializeAsync_WithValidEnvironment_LoadsDisksAndDriveLetters()
     {
         // Arrange
-        var disks = new List<DiskInfo>
-        {
-            new DiskInfo { Index = 1, Partitions = new List<PartitionInfo>() }
-        };
-        var driveLetters = new List<char> { 'Z', 'Y', 'X' };
+        List<DiskInfo> disks = [new() { Index = 1, Partitions = [] }];
+        List<char> driveLetters = ['Z', 'Y', 'X'];
 
         _mockEnvValidation
-            .Setup(v => v.ValidateEnvironmentAsync())
+            .Setup(v => v.ValidateEnvironmentAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EnvironmentValidationResult
             {
                 IsValid = true,
-                InstalledDistros = new List<string> { "Ubuntu" }
+                InstalledDistros = ["Ubuntu"]
             });
 
         _mockDiskService
@@ -153,8 +157,8 @@ public class MainViewModelTests
             .Returns(driveLetters);
 
         _mockMountStateService
-            .Setup(m => m.GetActiveMountsAsync())
-            .ReturnsAsync(new List<ActiveMount>());
+            .Setup(m => m.GetActiveMountsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
 
         var vm = CreateViewModel();
 
@@ -179,24 +183,24 @@ public class MainViewModelTests
         };
 
         _mockEnvValidation
-            .Setup(v => v.ValidateEnvironmentAsync())
+            .Setup(v => v.ValidateEnvironmentAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EnvironmentValidationResult
             {
                 IsValid = true,
-                InstalledDistros = new List<string> { "Ubuntu" }
+                InstalledDistros = ["Ubuntu"]
             });
 
         _mockDiskService
             .Setup(d => d.GetCandidateDisks())
-            .Returns(new List<DiskInfo>());
+            .Returns([]);
 
         _mockDriveLetterService
             .Setup(d => d.GetFreeLetters())
-            .Returns(new List<char>());
+            .Returns([]);
 
         _mockMountStateService
-            .Setup(m => m.GetActiveMountsAsync())
-            .ReturnsAsync(new List<ActiveMount> { activeMount });
+            .Setup(m => m.GetActiveMountsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([activeMount]);
 
         var vm = CreateViewModel();
 
@@ -208,7 +212,70 @@ public class MainViewModelTests
         await vm.InitializeAsync();
 
         // Assert - should have attempted to get active mounts
-        _mockMountStateService.Verify(m => m.GetActiveMountsAsync(), Times.Once);
+        _mockMountStateService.Verify(m => m.GetActiveMountsAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_WithMultipleStoredMounts_RestoresFirstReachableAndCleansOnlyStaleEntries()
+    {
+        var staleMount = new ActiveMount
+        {
+            DiskIndex = 1,
+            PartitionNumber = 1,
+            DriveLetter = 'Y',
+            MountPathUNC = @"\\wsl.localhost\Ubuntu\mnt\wsl\PHYSICALDRIVE1p1_missing"
+        };
+
+        var reachableDirectory = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), $"limount_restore_{Guid.NewGuid()}"));
+        var validMount = new ActiveMount
+        {
+            DiskIndex = 2,
+            PartitionNumber = 2,
+            DriveLetter = 'Z',
+            MountPathUNC = reachableDirectory.FullName
+        };
+
+        _mockEnvValidation
+            .Setup(v => v.ValidateEnvironmentAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EnvironmentValidationResult
+            {
+                IsValid = true,
+                InstalledDistros = ["Ubuntu"]
+            });
+
+        _mockDiskService
+            .Setup(d => d.GetCandidateDisks())
+            .Returns([]);
+
+        _mockDriveLetterService
+            .Setup(d => d.GetFreeLetters())
+            .Returns([]);
+
+        _mockMountStateService
+            .Setup(m => m.GetActiveMountsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([staleMount, validMount]);
+
+        var vm = CreateViewModel();
+
+        try
+        {
+            await vm.InitializeAsync();
+
+            vm.CurrentMountedDiskIndex.Should().Be(2);
+            vm.CurrentMountedPartition.Should().Be(2);
+            vm.CurrentMountedDriveLetter.Should().Be('Z');
+
+            _mockMountStateService.Verify(
+                m => m.UnregisterMountAsync(1, 1, It.IsAny<CancellationToken>()),
+                Times.Once);
+            _mockMountStateService.Verify(
+                m => m.UnregisterMountAsync(2, 2, It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+        finally
+        {
+            reachableDirectory.Delete(true);
+        }
     }
 
     [Fact]
@@ -217,7 +284,7 @@ public class MainViewModelTests
         // Arrange
         var vm = CreateViewModel();
         vm.IsBusy = false;
-        vm.SelectedDisk = new DiskInfo { Index = 1, Partitions = new List<PartitionInfo>() };
+        vm.SelectedDisk = new DiskInfo { Index = 1, Partitions = [] };
         vm.SelectedPartition = new PartitionInfo { PartitionNumber = 1 };
         vm.SelectedDriveLetter = 'Z';
 
@@ -231,7 +298,7 @@ public class MainViewModelTests
         // Arrange
         var vm = CreateViewModel();
         vm.IsBusy = true;
-        vm.SelectedDisk = new DiskInfo { Index = 1, Partitions = new List<PartitionInfo>() };
+        vm.SelectedDisk = new DiskInfo { Index = 1, Partitions = [] };
         vm.SelectedPartition = new PartitionInfo { PartitionNumber = 1 };
         vm.SelectedDriveLetter = 'Z';
 
@@ -245,7 +312,7 @@ public class MainViewModelTests
         // Arrange
         var vm = CreateViewModel();
         vm.CurrentMountedDiskIndex = 1; // Already mounted
-        vm.SelectedDisk = new DiskInfo { Index = 2, Partitions = new List<PartitionInfo>() };
+        vm.SelectedDisk = new DiskInfo { Index = 2, Partitions = [] };
         vm.SelectedPartition = new PartitionInfo { PartitionNumber = 1 };
         vm.SelectedDriveLetter = 'Z';
 
@@ -271,7 +338,7 @@ public class MainViewModelTests
     {
         // Arrange
         var vm = CreateViewModel();
-        vm.SelectedDisk = new DiskInfo { Index = 1, Partitions = new List<PartitionInfo>() };
+        vm.SelectedDisk = new DiskInfo { Index = 1, Partitions = [] };
         vm.SelectedPartition = new PartitionInfo { PartitionNumber = 1 };
         vm.SelectedDriveLetter = 'Z';
 
@@ -287,7 +354,7 @@ public class MainViewModelTests
         };
 
         _mockMountOrchestrator
-            .Setup(m => m.MountAndMapAsync(1, 1, 'Z', It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IProgress<string>>()))
+            .Setup(m => m.MountAndMapAsync(1, 1, 'Z', It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IProgress<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(mountResult);
 
         // Act
@@ -305,7 +372,7 @@ public class MainViewModelTests
     {
         // Arrange
         var vm = CreateViewModel();
-        vm.SelectedDisk = new DiskInfo { Index = 1, Partitions = new List<PartitionInfo>() };
+        vm.SelectedDisk = new DiskInfo { Index = 1, Partitions = [] };
         vm.SelectedPartition = new PartitionInfo { PartitionNumber = 1 };
         vm.SelectedDriveLetter = 'Z';
 
@@ -316,7 +383,7 @@ public class MainViewModelTests
         };
 
         _mockMountOrchestrator
-            .Setup(m => m.MountAndMapAsync(1, 1, 'Z', It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IProgress<string>>()))
+            .Setup(m => m.MountAndMapAsync(1, 1, 'Z', It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IProgress<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(mountResult);
 
         // Act

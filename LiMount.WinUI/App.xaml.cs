@@ -3,13 +3,16 @@ using LiMount.Core.Configuration;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Services;
 using LiMount.WinUI.Services;
+using LiMount.WinUI.TestMode;
 using LiMount.WinUI.ViewModels;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.UI.Xaml;
 using Serilog;
+using System;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 
@@ -48,22 +51,43 @@ public partial class App : Application
 #pragma warning restore IL3050
 #pragma warning restore IL2026
 
-                // Core services
-                services.AddSingleton<IDiskEnumerationService, DiskEnumerationService>();
-                services.AddSingleton<IDriveLetterService, DriveLetterService>();
-                services.AddSingleton<IMountHistoryService, MountHistoryService>();
-                services.AddSingleton<IMountStateService, MountStateService>();
-                services.AddSingleton<IEnvironmentValidationService, EnvironmentValidationService>();
-                services.AddTransient<IMountOrchestrator, MountOrchestrator>();
-                services.AddTransient<IUnmountOrchestrator, UnmountOrchestrator>();
+                var isTestMode = string.Equals(
+                    Environment.GetEnvironmentVariable("LIMOUNT_TEST_MODE"),
+                    "1",
+                    StringComparison.OrdinalIgnoreCase);
 
-                // Register ScriptExecutor with all focused interfaces
-                services.AddSingleton<ScriptExecutor>();
-                services.AddSingleton<IMountScriptService>(sp => sp.GetRequiredService<ScriptExecutor>());
-                services.AddSingleton<IDriveMappingService>(sp => sp.GetRequiredService<ScriptExecutor>());
-                services.AddSingleton<IFilesystemDetectionService>(sp => sp.GetRequiredService<ScriptExecutor>());
+                if (isTestMode)
+                {
+                    services.PostConfigure<LiMountConfiguration>(config =>
+                    {
+                        config.Initialization.AutoReconcileMounts = false;
+                        config.Initialization.AutoDetectSystemMounts = false;
+                    });
+                    services.AddLiMountTestModeServices();
+                }
+                else
+                {
+                    // Core services
+                    services.AddSingleton<IDiskEnumerationService, DiskEnumerationService>();
+                    services.AddSingleton<IDriveLetterService, DriveLetterService>();
+                    services.AddSingleton<IMountHistoryService, MountHistoryService>();
+                    services.AddSingleton<IMountStateService, MountStateService>();
+                    services.AddSingleton<IEnvironmentValidationService, EnvironmentValidationService>();
+                    services.AddTransient<IMountOrchestrator, MountOrchestrator>();
+                    services.AddTransient<IUnmountOrchestrator, UnmountOrchestrator>();
+
+                    // Register ScriptExecutor with all focused interfaces
+                    services.AddSingleton<ScriptExecutor>();
+                    services.AddSingleton<IMountScriptService>(sp => sp.GetRequiredService<ScriptExecutor>());
+                    services.AddSingleton<IDriveMappingService>(sp => sp.GetRequiredService<ScriptExecutor>());
+                    services.AddSingleton<IFilesystemDetectionService>(sp => sp.GetRequiredService<ScriptExecutor>());
+                }
+
 #pragma warning disable CS0618 // IScriptExecutor is obsolete - kept for backward compatibility
-                services.AddSingleton<IScriptExecutor>(sp => sp.GetRequiredService<ScriptExecutor>());
+                if (!isTestMode)
+                {
+                    services.AddSingleton<IScriptExecutor>(sp => sp.GetRequiredService<ScriptExecutor>());
+                }
 #pragma warning restore CS0618
 
                 // UI infrastructure
@@ -73,6 +97,20 @@ public partial class App : Application
                 services.AddSingleton<IDialogService, DialogService>();
 
                 // ViewModels
+                services.AddTransient<MainViewModel.MountingServices>(sp => new MainViewModel.MountingServices(
+                    sp.GetRequiredService<IDiskEnumerationService>(),
+                    sp.GetRequiredService<IDriveLetterService>(),
+                    sp.GetRequiredService<IMountOrchestrator>(),
+                    sp.GetRequiredService<IUnmountOrchestrator>(),
+                    sp.GetRequiredService<IMountStateService>(),
+                    sp.GetRequiredService<IFilesystemDetectionService>()));
+
+                services.AddTransient<MainViewModel.AppServices>(sp => new MainViewModel.AppServices(
+                    sp.GetRequiredService<IEnvironmentValidationService>(),
+                    sp.GetRequiredService<IDialogService>(),
+                    sp.GetRequiredService<ILogger<MainViewModel>>(),
+                    sp.GetRequiredService<IOptions<LiMountConfiguration>>()));
+
                 services.AddTransient<MainViewModel>();
                 services.AddTransient<HistoryViewModel>();
 

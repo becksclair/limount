@@ -1,26 +1,28 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <!-- Target Windows-specific framework since this library uses WMI (Windows-only APIs) -->
-    <TargetFramework>net8.0-windows</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <LangVersion>latest</LangVersion>
-    <!-- WSL2 GUI apps require Windows 10 build 19044+ or Windows 11 -->
-    <SupportedOSPlatformVersion>7.0</SupportedOSPlatformVersion>
-  </PropertyGroup>
+	<PropertyGroup>
+		<!-- Target Windows-specific framework since this library uses WMI (Windows-only APIs) -->
+		<TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+		<TargetPlatformMinVersion>10.0.26100.0</TargetPlatformMinVersion>
+		<WindowsSdkPackageVersion>10.0.26100.81</WindowsSdkPackageVersion>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<LangVersion>latest</LangVersion>
+		<!-- WSL2 GUI apps require Windows 10 build 19044+ or Windows 11 -->
+		<SupportedOSPlatformVersion>7.0</SupportedOSPlatformVersion>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <!-- System.Management for WMI access to Win32_DiskDrive, Win32_Volume, etc. -->
-    <!-- Version 10.0.0 is the latest stable for .NET 8 -->
-    <PackageReference Include="System.Management" Version="10.0.0" />
+	<ItemGroup>
+		<!-- System.Management for WMI access to Win32_DiskDrive, Win32_Volume, etc. -->
+		<!-- Version 10.0.0 is the latest stable for .NET 8 -->
+		<PackageReference Include="System.Management" Version="10.0.0" />
 
-    <!-- Microsoft.Extensions for configuration and logging support -->
-    <PackageReference Include="Microsoft.Extensions.Options" Version="9.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
+		<!-- Microsoft.Extensions for configuration and logging support -->
+		<PackageReference Include="Microsoft.Extensions.Options" Version="9.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
 
-    <!-- CommunityToolkit.Mvvm for ObservableObject, ObservableProperty, RelayCommand source generators -->
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
-  </ItemGroup>
+		<!-- CommunityToolkit.Mvvm for ObservableObject, ObservableProperty, RelayCommand source generators -->
+		<PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+	</ItemGroup>
 
 </Project>

@@ -193,7 +193,7 @@ public class ConcurrencyTests : IDisposable
             };
 
             await service.RegisterMountAsync(mount);
-            await service.UnregisterMountAsync(1);
+            await service.UnregisterDiskAsync(1);
         }
 
         // Assert - should end with empty state

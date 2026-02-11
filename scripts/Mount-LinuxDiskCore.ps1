@@ -25,6 +25,11 @@
     Required: GUID-based temp file path where output will be written.
     This prevents predictable temp file attacks (CWE-377).
 
+.PARAMETER SkipAdminCheck
+    Optional: bypasses the local admin-role preflight check.
+    Intended for automated hardware-in-loop test environments where
+    `wsl --mount` is permitted without an elevated PowerShell host.
+
 .EXAMPLE
     .\Mount-LinuxDiskCore.ps1 -DiskIndex 2 -Partition 1 -FsType ext4 -OutputFile "C:\Users\...\Temp\limount_mount_abc123.txt"
 
@@ -49,7 +54,10 @@ param(
     [string]$DistroName,
 
     [Parameter(Mandatory=$true)]
-    [string]$OutputFile
+    [string]$OutputFile,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$SkipAdminCheck
 )
 
 # Function to output result and exit
@@ -59,7 +67,12 @@ function Write-Result {
         [string]$DistroName = "",
         [string]$MountPathLinux = "",
         [string]$MountPathUNC = "",
-        [string]$ErrorMessage = ""
+        [bool]$AlreadyMounted = $false,
+        [Nullable[bool]]$UncVerified = $null,
+        [string]$ErrorMessage = "",
+        [string]$ErrorCode = "",
+        [string]$ErrorHint = "",
+        [string]$DmesgSummary = ""
     )
 
     $output = @()
@@ -69,10 +82,23 @@ function Write-Result {
         $output += "DistroName=$DistroName"
         $output += "MountPathLinux=$MountPathLinux"
         $output += "MountPathUNC=$MountPathUNC"
+        $output += "AlreadyMounted=$($AlreadyMounted.ToString().ToLowerInvariant())"
+        if ($null -ne $UncVerified) {
+            $output += "UncVerified=$($UncVerified.Value.ToString().ToLowerInvariant())"
+        }
         $exitCode = 0
     } else {
         $output += "STATUS=ERROR"
         $output += "ErrorMessage=$ErrorMessage"
+        if (-not [string]::IsNullOrWhiteSpace($ErrorCode)) {
+            $output += "ErrorCode=$ErrorCode"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($ErrorHint)) {
+            $output += "ErrorHint=$ErrorHint"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($DmesgSummary)) {
+            $output += "DmesgSummary=$DmesgSummary"
+        }
         $exitCode = 1
     }
 
@@ -89,10 +115,86 @@ function Write-Result {
     exit $exitCode
 }
 
-# Require Administrator
-$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Result -Success $false -ErrorMessage "This script requires Administrator privileges."
+function Normalize-CommandText {
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$Text
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return ""
+    }
+
+    $withoutNull = $Text -replace "`0", ""
+    $withoutControls = [regex]::Replace($withoutNull, "[\x01-\x1F]+", " ")
+    return ([regex]::Replace($withoutControls, "\s+", " ")).Trim()
+}
+
+function Get-MountFailureDiagnostics {
+    param(
+        [string]$ErrorText
+    )
+
+    $normalizedErrorText = Normalize-CommandText -Text $ErrorText
+    $defaultHint = "WSL rejected the mount request. Review kernel/system logs in WSL for detailed context."
+    $default = @{
+        ErrorCode = "MOUNT_INVALID_ARGUMENT"
+        ErrorHint = $defaultHint
+        DmesgSummary = ""
+    }
+
+    if ($normalizedErrorText -notmatch "Invalid argument") {
+        return $default
+    }
+
+    try {
+        $dmesgOutput = & wsl.exe -e sh -lc "dmesg | tail -n 200" 2>&1
+        if ($LASTEXITCODE -ne 0 -or -not $dmesgOutput) {
+            return $default
+        }
+
+        $cleaned = $dmesgOutput | ForEach-Object {
+            ($_ -replace '[\r\n]+', ' ').Trim()
+        } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+        $xfsSignals = $cleaned | Where-Object {
+            $_ -match "XFS .*unknown incompatible features" -or
+            $_ -match "Filesystem cannot be safely mounted by this kernel" -or
+            $_ -match "SB validate failed"
+        } | Select-Object -Last 3
+
+        if ($xfsSignals -and $xfsSignals.Count -gt 0) {
+            return @{
+                ErrorCode = "XFS_UNSUPPORTED_FEATURES"
+                ErrorHint = "This XFS filesystem uses features unsupported by the current WSL kernel. Update WSL kernel or mount on native Linux."
+                DmesgSummary = ($xfsSignals -join " | ")
+            }
+        }
+
+        $genericSignals = $cleaned | Where-Object {
+            $_ -match "DiskMount" -or
+            $_ -match "mount\(" -or
+            $_ -match "invalid argument"
+        } | Select-Object -Last 3
+
+        return @{
+            ErrorCode = "MOUNT_INVALID_ARGUMENT"
+            ErrorHint = $defaultHint
+            DmesgSummary = ($genericSignals -join " | ")
+        }
+    } catch {
+        return $default
+    }
+}
+
+# Require Administrator (unless explicitly bypassed for HIL test automation)
+if (-not $SkipAdminCheck.IsPresent) {
+    $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        Write-Result -Success $false -ErrorMessage "This script requires Administrator privileges."
+    }
 }
 
 # Validate DiskIndex
@@ -117,6 +219,7 @@ $diskPath = "\\.\PHYSICALDRIVE$DiskIndex"
 
 # Execute wsl --mount
 Write-Verbose "Mounting $diskPath partition $Partition as $FsType..."
+$alreadyMounted = $false
 
 try {
     # Build mount arguments - omit --type for "auto" to let WSL detect
@@ -131,18 +234,30 @@ try {
 
     if ($mountExitCode -ne 0) {
         # Check for common error messages
-        $errorText = $mountOutput -join " "
+        $errorText = Normalize-CommandText -Text ($mountOutput -join " ")
 
         if ($errorText -match "already mounted" -or $errorText -match "is in use") {
             Write-Verbose "Disk appears to already be mounted, continuing..."
+            $alreadyMounted = $true
         } elseif ($errorText -match "not recognized" -or $errorText -match "invalid option") {
             Write-Result -Success $false -ErrorMessage "wsl --mount is not supported. Ensure you are running Windows 11 Build 22000+ or Microsoft Store WSL."
         } else {
-            Write-Result -Success $false -ErrorMessage "wsl --mount failed (exit code $mountExitCode): $errorText"
+            $diagnostics = Get-MountFailureDiagnostics -ErrorText $errorText
+            Write-Result -Success $false `
+                -ErrorMessage "wsl --mount failed (exit code $mountExitCode): $errorText" `
+                -ErrorCode $diagnostics.ErrorCode `
+                -ErrorHint $diagnostics.ErrorHint `
+                -DmesgSummary $diagnostics.DmesgSummary
         }
     }
 } catch {
-    Write-Result -Success $false -ErrorMessage "Failed to execute wsl --mount: $($_.Exception.Message)"
+    $exceptionMessage = "Failed to execute wsl --mount: $($_.Exception.Message)"
+    $diagnostics = Get-MountFailureDiagnostics -ErrorText $exceptionMessage
+    Write-Result -Success $false `
+        -ErrorMessage $exceptionMessage `
+        -ErrorCode $diagnostics.ErrorCode `
+        -ErrorHint $diagnostics.ErrorHint `
+        -DmesgSummary $diagnostics.DmesgSummary
 }
 
 # Determine distro name
@@ -239,8 +354,10 @@ Write-Verbose "UNC path: $mountPathUNC"
 
 # Verify UNC path is accessible (optional, as it may take a moment to appear)
 Start-Sleep -Milliseconds 500
+$uncVerified = $false
 if (Test-Path $mountPathUNC) {
     Write-Verbose "UNC path is accessible."
+    $uncVerified = $true
 } else {
     Write-Verbose "Warning: UNC path not immediately accessible, but continuing..."
 }
@@ -249,4 +366,6 @@ if (Test-Path $mountPathUNC) {
 Write-Result -Success $true `
     -DistroName $DistroName `
     -MountPathLinux $mountPathLinux `
-    -MountPathUNC $mountPathUNC
+    -MountPathUNC $mountPathUNC `
+    -AlreadyMounted $alreadyMounted `
+    -UncVerified $uncVerified

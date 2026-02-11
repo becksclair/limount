@@ -27,7 +27,23 @@ public interface IMountStateService
     /// </summary>
     /// <param name="diskIndex">The disk index to unregister.</param>
     /// <param name="cancellationToken">Token to cancel the operation.</param>
+    [Obsolete("Use UnregisterDiskAsync for disk-wide removal or UnregisterMountAsync(diskIndex, partition) for partition-scoped removal.")]
     Task UnregisterMountAsync(int diskIndex, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Unregisters a specific mounted partition.
+    /// </summary>
+    /// <param name="diskIndex">The disk index to unregister from.</param>
+    /// <param name="partition">The partition number to unregister.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    Task UnregisterMountAsync(int diskIndex, int partition, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Unregisters all mounted partitions for a disk.
+    /// </summary>
+    /// <param name="diskIndex">The disk index to unregister.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    Task UnregisterDiskAsync(int diskIndex, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets the active mount for a specific disk, if any.
@@ -36,6 +52,23 @@ public interface IMountStateService
     /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>The active mount or null if not found.</returns>
     Task<ActiveMount?> GetMountForDiskAsync(int diskIndex, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets the active mount for a specific disk partition, if any.
+    /// </summary>
+    /// <param name="diskIndex">The disk index to query.</param>
+    /// <param name="partition">The partition number to query.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    /// <returns>The active mount or null if not found.</returns>
+    Task<ActiveMount?> GetMountForDiskPartitionAsync(int diskIndex, int partition, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets all active mounts for a specific disk.
+    /// </summary>
+    /// <param name="diskIndex">The disk index to query.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    /// <returns>Read-only list of mounts for the disk.</returns>
+    Task<IReadOnlyList<ActiveMount>> GetMountsForDiskAsync(int diskIndex, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets the active mount for a specific drive letter, if any.

@@ -69,6 +69,12 @@ public class MountOperationsConfig
     public int ReconcileUncAccessibilityTimeoutMs { get; set; } = 2000;
 
     /// <summary>
+    /// Timeout in milliseconds for each UNC existence check in mount orchestration.
+    /// This is separate from retry delay/backoff.
+    /// </summary>
+    public int UncExistenceCheckTimeoutMs { get; set; } = 2000;
+
+    /// <summary>
     /// Timeout in milliseconds for UNC path accessibility checks in the UI.
     /// </summary>
     public int UncPathCheckTimeoutMs { get; set; } = 2000;
@@ -82,6 +88,12 @@ public class MountOperationsConfig
     /// Timeout in milliseconds for WSL command execution.
     /// </summary>
     public int WslCommandTimeoutMs { get; set; } = 5000;
+
+    /// <summary>
+    /// Timeout in milliseconds for rollback unmount operations when mount fails.
+    /// Clamped to 500-10000ms in MountOrchestrator.
+    /// </summary>
+    public int RollbackTimeoutMs { get; set; } = 5000;
 }
 
 /// <summary>
@@ -129,4 +141,10 @@ public class InitializationConfig
     /// Whether to automatically reconcile mount state on startup.
     /// </summary>
     public bool AutoReconcileMounts { get; set; } = true;
+
+    /// <summary>
+    /// Whether to detect active mounts directly from system subst/WSL probes on startup.
+    /// Disable for deterministic test-mode startup behavior.
+    /// </summary>
+    public bool AutoDetectSystemMounts { get; set; } = true;
 }

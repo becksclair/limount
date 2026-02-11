@@ -120,7 +120,10 @@ public class FilesystemDetectionTests
             Success = true,
             MountPathLinux = "/mnt/wsl/PHYSICALDRIVE1p2",
             MountPathUNC = @"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p2",
-            DistroName = "Ubuntu"
+            DistroName = "Ubuntu",
+            ErrorCode = "XFS_UNSUPPORTED_FEATURES",
+            ErrorHint = "hint",
+            DmesgSummary = "summary"
         };
 
         // Assert
@@ -128,6 +131,50 @@ public class FilesystemDetectionTests
         result.MountPathLinux.Should().Be("/mnt/wsl/PHYSICALDRIVE1p2");
         result.MountPathUNC.Should().Be(@"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p2");
         result.DistroName.Should().Be("Ubuntu");
+        result.ErrorCode.Should().Be("XFS_UNSUPPORTED_FEATURES");
+        result.ErrorHint.Should().Be("hint");
+        result.DmesgSummary.Should().Be("summary");
+    }
+
+    [Fact]
+    public void MountResult_FromDictionary_ParsesAlreadyMountedAndUncVerified()
+    {
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["STATUS"] = "OK",
+            ["DistroName"] = "Ubuntu",
+            ["MountPathLinux"] = "/mnt/wsl/PHYSICALDRIVE1p2",
+            ["MountPathUNC"] = @"\\wsl.localhost\Ubuntu\mnt\wsl\PHYSICALDRIVE1p2",
+            ["AlreadyMounted"] = "true",
+            ["UncVerified"] = "false",
+            ["ErrorCode"] = "XFS_UNSUPPORTED_FEATURES",
+            ["ErrorHint"] = "Kernel feature mismatch",
+            ["DmesgSummary"] = "XFS (sde2): Superblock has unknown incompatible features"
+        };
+
+        var result = MountResult.FromDictionary(values);
+
+        result.Success.Should().BeTrue();
+        result.AlreadyMounted.Should().BeTrue();
+        result.UncVerified.Should().BeFalse();
+        result.ErrorCode.Should().Be("XFS_UNSUPPORTED_FEATURES");
+        result.ErrorHint.Should().Be("Kernel feature mismatch");
+        result.DmesgSummary.Should().Contain("XFS");
+    }
+
+    [Fact]
+    public void MountResult_FromDictionary_MissingOptionalFlags_DefaultsToFalseAndNull()
+    {
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["STATUS"] = "OK"
+        };
+
+        var result = MountResult.FromDictionary(values);
+
+        result.Success.Should().BeTrue();
+        result.AlreadyMounted.Should().BeFalse();
+        result.UncVerified.Should().BeNull();
     }
 
     [Fact]

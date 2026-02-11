@@ -22,15 +22,31 @@ namespace LiMount.Core.Services;
 /// </remarks>
 [SupportedOSPlatform("windows")]
 #pragma warning disable CS0618 // IScriptExecutor is obsolete - intentionally implementing for backward compatibility
-public partial class ScriptExecutor : IMountScriptService, IDriveMappingService, IFilesystemDetectionService, IScriptExecutor
+public partial class ScriptExecutor : IScriptExecutor
 #pragma warning restore CS0618
 {
-    // Compiled regex patterns for efficient parsing of lsblk output
-    [GeneratedRegex(@"NAME=""([^""]+)""", RegexOptions.Compiled)]
+    // Source-generated regex patterns for efficient parsing of lsblk output
+    // Note: RegexOptions.Compiled is not needed with [GeneratedRegex] - regex is compiled at build time
+    [GeneratedRegex(@"NAME=""([^""]+)""")]
     private static partial Regex NameRegex();
 
-    [GeneratedRegex(@"FSTYPE=""([^""]*)""", RegexOptions.Compiled)]
+    [GeneratedRegex(@"FSTYPE=""([^""]*)""")]
     private static partial Regex FsTypeRegex();
+
+    [GeneratedRegex(@"PKNAME=""([^""]*)""")]
+    private static partial Regex ParentNameRegex();
+
+    private const string PowerShellExe = "powershell.exe";
+
+    /// <summary>
+    /// Allowed filesystem types to prevent command injection.
+    /// Must match the ValidateSet in Mount-LinuxDiskCore.ps1.
+    /// </summary>
+    private static readonly HashSet<string> ValidFileSystemTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "ext4", "xfs", "btrfs", "vfat", "auto"
+    };
+    private const string SkipScriptElevationEnvVar = "LIMOUNT_SKIP_SCRIPT_ELEVATION";
 
     private readonly string _scriptsPath;
     private readonly ILogger<ScriptExecutor>? _logger;
@@ -96,6 +112,17 @@ public partial class ScriptExecutor : IMountScriptService, IDriveMappingService,
             };
         }
 
+        // Security: Validate fsType against whitelist to prevent command injection
+        var trimmedFsType = fsType.Trim();
+        if (!ValidFileSystemTypes.Contains(trimmedFsType))
+        {
+            return new MountResult
+            {
+                Success = false,
+                ErrorMessage = $"Unsupported filesystem type '{trimmedFsType}'. Supported types: {string.Join(", ", ValidFileSystemTypes)}"
+            };
+        }
+
         var scriptPath = Path.Combine(_scriptsPath, "Mount-LinuxDiskCore.ps1");
         if (!File.Exists(scriptPath))
         {
@@ -106,8 +133,6 @@ public partial class ScriptExecutor : IMountScriptService, IDriveMappingService,
             };
         }
 
-        var trimmedFsType = fsType.Trim();
-
         // Generate GUID-based temp file path BEFORE script execution to prevent
         // predictable temp file attacks (CWE-377: Insecure Temporary File)
         var tempFileId = Guid.NewGuid().ToString("N");
@@ -117,12 +142,37 @@ public partial class ScriptExecutor : IMountScriptService, IDriveMappingService,
                        $"-DiskIndex {diskIndex} -Partition {partition} -FsType {trimmedFsType} " +
                        $"-OutputFile \"{tempOutputFile}\"";
 
+        var skipScriptElevation = ShouldSkipScriptElevation();
+        if (skipScriptElevation)
+        {
+            arguments += " -SkipAdminCheck";
+            _logger?.LogWarning(
+                "Test mode detected via {EnvVar}=1. Running mount script without elevation.",
+                SkipScriptElevationEnvVar);
+        }
+
         if (!string.IsNullOrEmpty(distroName))
         {
             arguments += $" -DistroName \"{distroName}\"";
         }
 
-        var output = await ExecuteElevatedScriptAsync("powershell.exe", arguments, tempOutputFile, cancellationToken);
+        string output;
+        if (skipScriptElevation)
+        {
+            var (stdout, stderr) = await ExecuteNonElevatedScriptAsync(PowerShellExe, arguments, cancellationToken);
+            output = stdout;
+            if (!string.IsNullOrWhiteSpace(stderr) &&
+                !stdout.Contains("STATUS=OK", StringComparison.OrdinalIgnoreCase) &&
+                !stdout.Contains("ErrorMessage=", StringComparison.OrdinalIgnoreCase))
+            {
+                output = $"STATUS=ERROR\nErrorMessage={stderr.Trim()}";
+            }
+        }
+        else
+        {
+            output = await ExecuteElevatedScriptAsync(PowerShellExe, arguments, tempOutputFile, cancellationToken);
+        }
+
         var parsedValues = KeyValueOutputParser.Parse(output);
         return MountResult.FromDictionary(parsedValues);
     }
@@ -167,7 +217,7 @@ public partial class ScriptExecutor : IMountScriptService, IDriveMappingService,
         var arguments = $"-ExecutionPolicy Bypass -File \"{scriptPath}\" " +
                        $"-DriveLetter {driveLetter} -TargetUNC \"{targetUNC}\"";
 
-        var (output, error) = await ExecuteNonElevatedScriptAsync("powershell.exe", arguments, cancellationToken);
+        var (output, error) = await ExecuteNonElevatedScriptAsync(PowerShellExe, arguments, cancellationToken);
         var parsedValues = KeyValueOutputParser.Parse(output);
         var result = MappingResult.FromDictionary(parsedValues);
 
@@ -221,7 +271,32 @@ public partial class ScriptExecutor : IMountScriptService, IDriveMappingService,
         var arguments = $"-ExecutionPolicy Bypass -File \"{scriptPath}\" -DiskIndex {diskIndex} " +
                        $"-OutputFile \"{tempOutputFile}\"";
 
-        var output = await ExecuteElevatedScriptAsync("powershell.exe", arguments, tempOutputFile, cancellationToken);
+        var skipScriptElevation = ShouldSkipScriptElevation();
+        if (skipScriptElevation)
+        {
+            arguments += " -SkipAdminCheck";
+            _logger?.LogWarning(
+                "Test mode detected via {EnvVar}=1. Running unmount script without elevation.",
+                SkipScriptElevationEnvVar);
+        }
+
+        string output;
+        if (skipScriptElevation)
+        {
+            var (stdout, stderr) = await ExecuteNonElevatedScriptAsync(PowerShellExe, arguments, cancellationToken);
+            output = stdout;
+            if (!string.IsNullOrWhiteSpace(stderr) &&
+                !stdout.Contains("STATUS=OK", StringComparison.OrdinalIgnoreCase) &&
+                !stdout.Contains("ErrorMessage=", StringComparison.OrdinalIgnoreCase))
+            {
+                output = $"STATUS=ERROR\nErrorMessage={stderr.Trim()}";
+            }
+        }
+        else
+        {
+            output = await ExecuteElevatedScriptAsync(PowerShellExe, arguments, tempOutputFile, cancellationToken);
+        }
+
         var parsedValues = KeyValueOutputParser.Parse(output);
         return UnmountResult.FromDictionary(parsedValues);
     }
@@ -257,7 +332,7 @@ public partial class ScriptExecutor : IMountScriptService, IDriveMappingService,
 
         var arguments = $"-ExecutionPolicy Bypass -File \"{scriptPath}\" -DriveLetter {driveLetter}";
 
-        var (output, error) = await ExecuteNonElevatedScriptAsync("powershell.exe", arguments, cancellationToken);
+        var (output, error) = await ExecuteNonElevatedScriptAsync(PowerShellExe, arguments, cancellationToken);
         var parsedValues = KeyValueOutputParser.Parse(output);
         var result = UnmappingResult.FromDictionary(parsedValues);
 
@@ -389,7 +464,7 @@ public partial class ScriptExecutor : IMountScriptService, IDriveMappingService,
     /// A tuple where `output` is the process's standard output and `error` is the process's standard error.
     /// If the process fails to start or an exception occurs, `output` contains an error status message and `error` is an empty string.
     /// </returns>
-    private async Task<(string output, string error)> ExecuteNonElevatedScriptAsync(string fileName, string arguments, CancellationToken cancellationToken = default)
+    private static async Task<(string output, string error)> ExecuteNonElevatedScriptAsync(string fileName, string arguments, CancellationToken cancellationToken = default)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -437,6 +512,14 @@ public partial class ScriptExecutor : IMountScriptService, IDriveMappingService,
         }
     }
 
+    private static bool ShouldSkipScriptElevation()
+    {
+        return string.Equals(
+            Environment.GetEnvironmentVariable(SkipScriptElevationEnvVar),
+            "1",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// Locate the directory that contains the PowerShell scripts used by the executor.
     /// </summary>
@@ -479,31 +562,24 @@ public partial class ScriptExecutor : IMountScriptService, IDriveMappingService,
 
             if (alreadyMounted)
             {
-                // Disk is already mounted - just run lsblk directly
-                _logger?.LogInformation("Disk {DiskIndex} is already mounted, reading filesystem type directly", diskIndex);
-                var (success, output, _) = await RunWslCommandAsync("lsblk -f -o NAME,FSTYPE -P", cancellationToken);
-                if (success && !string.IsNullOrEmpty(output))
-                {
-                    var fsType = ParseLsblkOutput(output, partitionNumber);
-                    _logger?.LogInformation("Detected filesystem type: {FsType}", fsType ?? "unknown");
-                    return fsType;
-                }
-                return null;
+                _logger?.LogInformation("Disk {DiskIndex} partition {Partition} is already mounted; detecting filesystem from mounted path", diskIndex, partitionNumber);
+                return await TryDetectFsTypeFromMountedPathAsync(diskIndex, partitionNumber, cancellationToken);
             }
 
+            var beforeAttachSnapshot = await TryGetLsblkSnapshotAsync(cancellationToken);
+
             // Step 1: Attach disk with --bare (requires elevation)
-            var (attachSuccess, attachOutput, attachError) = await RunElevatedWslCommandAsync($"--mount {diskPath} --bare", cancellationToken);
+            var (attachSuccess, _, attachError) = await RunElevatedWslCommandAsync($"--mount {diskPath} --bare", cancellationToken);
             if (!attachSuccess)
             {
-                // Check if already mounted error
-                if (attachError?.Contains("already mounted", StringComparison.OrdinalIgnoreCase) == true)
+                var alreadyMountedFsType = await TryDetectFsTypeWhenAttachIndicatesAlreadyMountedAsync(
+                    diskIndex,
+                    partitionNumber,
+                    attachError,
+                    cancellationToken);
+                if (!string.IsNullOrEmpty(alreadyMountedFsType))
                 {
-                    _logger?.LogInformation("Disk already mounted, trying lsblk directly");
-                    var (success, output, error) = await RunWslCommandAsync("lsblk -f -o NAME,FSTYPE -P", cancellationToken);
-                    if (success && !string.IsNullOrEmpty(output))
-                    {
-                        return ParseLsblkOutput(output, partitionNumber);
-                    }
+                    return alreadyMountedFsType;
                 }
                 _logger?.LogWarning("Failed to attach disk for filesystem detection: {Error}", attachError);
                 return null;
@@ -511,18 +587,16 @@ public partial class ScriptExecutor : IMountScriptService, IDriveMappingService,
 
             try
             {
-                // Step 2: Run lsblk to detect filesystem (no elevation needed)
-                var (success, output, error) = await RunWslCommandAsync("lsblk -f -o NAME,FSTYPE -P", cancellationToken);
-                if (!success || string.IsNullOrEmpty(output))
+                // Step 2: Snapshot lsblk after attach and resolve the filesystem for the newly attached disk.
+                var afterAttachSnapshot = await TryGetLsblkSnapshotAsync(cancellationToken);
+                var fsType = ResolveFilesystemTypeFromSnapshots(beforeAttachSnapshot, afterAttachSnapshot, partitionNumber);
+
+                if (string.IsNullOrWhiteSpace(fsType))
                 {
-                    _logger?.LogWarning("Failed to run lsblk: {Error}", error);
-                    return null;
+                    // Step 3 fallback: resolve filesystem from mounted path directly.
+                    fsType = await TryDetectFsTypeFromMountedPathAsync(diskIndex, partitionNumber, cancellationToken);
                 }
 
-                // Step 3: Parse output to find filesystem type
-                // Looking for the partition that corresponds to the disk we attached
-                // Format: NAME="sde1" FSTYPE="xfs"
-                var fsType = ParseLsblkOutput(output, partitionNumber);
                 _logger?.LogInformation("Detected filesystem type: {FsType}", fsType ?? "unknown");
                 return fsType;
             }
@@ -537,10 +611,10 @@ public partial class ScriptExecutor : IMountScriptService, IDriveMappingService,
                 {
                     await RunElevatedWslCommandAsync($"--unmount {diskPath}", cleanupToken);
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException ex)
                 {
                     // If cleanup was cancelled, log but don't throw - cleanup should complete if possible
-                    _logger?.LogWarning("Cleanup unmount operation was cancelled for disk {DiskIndex}", diskIndex);
+                    _logger?.LogWarning(ex, "Cleanup unmount operation was cancelled for disk {DiskIndex}", diskIndex);
                 }
             }
         }
@@ -551,10 +625,25 @@ public partial class ScriptExecutor : IMountScriptService, IDriveMappingService,
         }
     }
 
+    private async Task<string?> TryDetectFsTypeWhenAttachIndicatesAlreadyMountedAsync(
+        int diskIndex,
+        int partitionNumber,
+        string? attachError,
+        CancellationToken cancellationToken)
+    {
+        if (attachError?.Contains("already mounted", StringComparison.OrdinalIgnoreCase) != true)
+        {
+            return null;
+        }
+
+        _logger?.LogInformation("Disk already mounted, trying mounted-path filesystem detection");
+        return await TryDetectFsTypeFromMountedPathAsync(diskIndex, partitionNumber, cancellationToken);
+    }
+
     /// <summary>
     /// Checks if a disk is already mounted in WSL.
     /// </summary>
-    private async Task<bool> IsDiskAlreadyMountedAsync(int diskIndex, int partitionNumber, CancellationToken cancellationToken = default)
+    private static async Task<bool> IsDiskAlreadyMountedAsync(int diskIndex, int partitionNumber, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -562,7 +651,7 @@ public partial class ScriptExecutor : IMountScriptService, IDriveMappingService,
             var mountName = $"PHYSICALDRIVE{diskIndex}p{partitionNumber}";
 
             // Try to find a WSL distro and check if mount exists
-            var (success, output, _) = await RunWslCommandAsync("-l -q", cancellationToken);
+            var (success, output, _) = await RunWslRawArgumentsAsync("-l -q", cancellationToken);
             if (!success || string.IsNullOrEmpty(output))
                 return false;
 
@@ -588,10 +677,8 @@ public partial class ScriptExecutor : IMountScriptService, IDriveMappingService,
     /// <summary>
     /// Runs an elevated WSL command (requires UAC).
     /// </summary>
-    private async Task<(bool Success, string? Output, string? Error)> RunElevatedWslCommandAsync(string arguments, CancellationToken cancellationToken = default)
+    private static async Task<(bool Success, string? Output, string? Error)> RunElevatedWslCommandAsync(string arguments, CancellationToken cancellationToken = default)
     {
-        var tempFile = Path.Combine(Path.GetTempPath(), $"wsl_output_{Guid.NewGuid()}.txt");
-
         try
         {
             var startInfo = new ProcessStartInfo
@@ -619,26 +706,51 @@ public partial class ScriptExecutor : IMountScriptService, IDriveMappingService,
         }
     }
 
+    internal static string BuildWslArguments(string command, bool useExecuteFlag)
+    {
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            throw new ArgumentException("WSL command cannot be null or whitespace.", nameof(command));
+        }
+
+        return useExecuteFlag
+            ? $"-e {command}"
+            : command;
+    }
+
     /// <summary>
-    /// Runs a non-elevated WSL command and captures output.
+    /// Runs a non-elevated WSL command via <c>wsl -e</c> and captures output.
     /// </summary>
-    /// <remarks>
-    /// SECURITY WARNING: The <paramref name="linuxCommand"/> parameter is passed directly to
-    /// wsl.exe without sanitization. This method MUST only be called with hard-coded,
-    /// trusted command strings. NEVER pass user-controlled input to this method as it could
-    /// lead to command injection attacks. All current usages pass hard-coded commands like
-    /// "lsblk -f -o NAME,FSTYPE -P" or "-l -q" which are safe.
-    /// </remarks>
-    private async Task<(bool Success, string? Output, string? Error)> RunWslCommandAsync(string linuxCommand, CancellationToken cancellationToken = default)
+    private static Task<(bool Success, string? Output, string? Error)> RunWslLinuxCommandAsync(
+        string linuxCommand,
+        CancellationToken cancellationToken = default)
+    {
+        return RunWslProcessAsync(linuxCommand, useExecuteFlag: true, cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs a non-elevated raw WSL command (without forcing <c>-e</c>) and captures output.
+    /// </summary>
+    private static Task<(bool Success, string? Output, string? Error)> RunWslRawArgumentsAsync(
+        string rawArguments,
+        CancellationToken cancellationToken = default)
+    {
+        return RunWslProcessAsync(rawArguments, useExecuteFlag: false, cancellationToken);
+    }
+
+    private static async Task<(bool Success, string? Output, string? Error)> RunWslProcessAsync(
+        string command,
+        bool useExecuteFlag,
+        CancellationToken cancellationToken = default)
     {
         try
         {
             var startInfo = new ProcessStartInfo
             {
                 FileName = "wsl.exe",
-                // SECURITY: linuxCommand is only ever called with hard-coded strings.
+                // SECURITY: command is only ever called with hard-coded strings.
                 // Do not refactor to accept user input without proper validation.
-                Arguments = $"-e {linuxCommand}",
+                Arguments = BuildWslArguments(command, useExecuteFlag),
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -663,40 +775,146 @@ public partial class ScriptExecutor : IMountScriptService, IDriveMappingService,
         }
     }
 
-    /// <summary>
-    /// Parses lsblk output to find the filesystem type for a partition.
-    /// </summary>
-    private static string? ParseLsblkOutput(string output, int partitionNumber)
+    internal sealed record LsblkEntry(string Name, string? ParentName, string? FileSystemType);
+
+    private async Task<IReadOnlyList<LsblkEntry>> TryGetLsblkSnapshotAsync(CancellationToken cancellationToken)
     {
-        // The mounted disk will be the last sd* device
-        // We're looking for lines like: NAME="sde1" FSTYPE="xfs"
-        var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-
-        // Find the newest device (highest sd letter) with a partition number
-        string? lastFsType = null;
-        foreach (var line in lines)
+        var (success, output, error) = await RunWslLinuxCommandAsync("lsblk -f -o NAME,PKNAME,FSTYPE -P", cancellationToken);
+        if (!success || string.IsNullOrWhiteSpace(output))
         {
-            // Look for partition entries (e.g., sd*1, sd*2)
-            if (line.Contains("NAME=\"") && line.Contains("FSTYPE=\""))
-            {
-                // Extract NAME and FSTYPE using pre-compiled static regex patterns
-                var nameMatch = NameRegex().Match(line);
-                var fsTypeMatch = FsTypeRegex().Match(line);
-
-                if (nameMatch.Success && fsTypeMatch.Success)
-                {
-                    var name = nameMatch.Groups[1].Value;
-                    var fsType = fsTypeMatch.Groups[1].Value;
-
-                    // Check if this is a partition (ends with a number matching our partition)
-                    if (name.EndsWith(partitionNumber.ToString()) && !string.IsNullOrEmpty(fsType))
-                    {
-                        lastFsType = fsType;
-                    }
-                }
-            }
+            _logger?.LogWarning("Failed to run lsblk snapshot for filesystem detection: {Error}", error);
+            return Array.Empty<LsblkEntry>();
         }
 
-        return lastFsType;
+        return ParseLsblkSnapshot(output);
+    }
+
+    internal static IReadOnlyList<LsblkEntry> ParseLsblkSnapshot(string output)
+    {
+        var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var entries = new List<LsblkEntry>(lines.Length);
+
+        foreach (var line in lines)
+        {
+            if (!line.Contains("NAME=\"", StringComparison.Ordinal) ||
+                !line.Contains("FSTYPE=\"", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var nameMatch = NameRegex().Match(line);
+            var fsTypeMatch = FsTypeRegex().Match(line);
+            if (!nameMatch.Success || !fsTypeMatch.Success)
+            {
+                continue;
+            }
+
+            var parentMatch = ParentNameRegex().Match(line);
+            var parentName = parentMatch.Success ? parentMatch.Groups[1].Value : null;
+
+            entries.Add(new LsblkEntry(
+                nameMatch.Groups[1].Value,
+                string.IsNullOrWhiteSpace(parentName) ? null : parentName,
+                fsTypeMatch.Groups[1].Value));
+        }
+
+        return entries;
+    }
+
+    internal static string? ResolveFilesystemTypeFromSnapshots(
+        IReadOnlyList<LsblkEntry> beforeAttach,
+        IReadOnlyList<LsblkEntry> afterAttach,
+        int partitionNumber)
+    {
+        if (beforeAttach.Count == 0 || afterAttach.Count == 0)
+        {
+            return null;
+        }
+
+        var beforeRootNames = new HashSet<string>(
+            beforeAttach.Where(e => string.IsNullOrEmpty(e.ParentName))
+                       .Select(e => e.Name),
+            StringComparer.OrdinalIgnoreCase);
+
+        var newRoots = afterAttach.Where(e => string.IsNullOrEmpty(e.ParentName))
+                                  .Select(e => e.Name)
+                                  .Where(name => !beforeRootNames.Contains(name))
+                                  .Distinct(StringComparer.OrdinalIgnoreCase)
+                                  .ToList();
+
+        if (newRoots.Count != 1)
+        {
+            return null;
+        }
+
+        var rootName = newRoots[0];
+        var matchingPartitions = afterAttach
+            .Where(e =>
+                string.Equals(e.ParentName, rootName, StringComparison.OrdinalIgnoreCase) &&
+                IsMatchingPartitionName(e.Name, partitionNumber) &&
+                !string.IsNullOrWhiteSpace(e.FileSystemType))
+            .ToList();
+
+        if (matchingPartitions.Count != 1)
+        {
+            return null;
+        }
+
+        return matchingPartitions[0].FileSystemType;
+    }
+
+    private static bool IsMatchingPartitionName(string partitionName, int partitionNumber)
+    {
+        var suffix = partitionNumber.ToString();
+        return partitionName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) ||
+               partitionName.EndsWith($"p{suffix}", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<string?> TryDetectFsTypeFromMountedPathAsync(
+        int diskIndex,
+        int partitionNumber,
+        CancellationToken cancellationToken)
+    {
+        var mountPath = $"/mnt/wsl/PHYSICALDRIVE{diskIndex}p{partitionNumber}";
+
+        var (sourceSuccess, sourceOutput, sourceError) = await RunWslLinuxCommandAsync(
+            $"findmnt -no SOURCE {mountPath}",
+            cancellationToken);
+
+        if (!sourceSuccess || string.IsNullOrWhiteSpace(sourceOutput))
+        {
+            _logger?.LogDebug(
+                "Unable to resolve mounted source for {MountPath}. Error: {Error}",
+                mountPath,
+                sourceError ?? "(none)");
+            return null;
+        }
+
+        var sourceDevice = sourceOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Trim())
+            .FirstOrDefault(line => !string.IsNullOrWhiteSpace(line));
+
+        if (string.IsNullOrWhiteSpace(sourceDevice))
+        {
+            return null;
+        }
+
+        var (fsSuccess, fsOutput, fsError) = await RunWslLinuxCommandAsync(
+            $"lsblk -no FSTYPE {sourceDevice}",
+            cancellationToken);
+
+        if (!fsSuccess || string.IsNullOrWhiteSpace(fsOutput))
+        {
+            _logger?.LogDebug(
+                "Unable to resolve filesystem type for {SourceDevice}. Error: {Error}",
+                sourceDevice,
+                fsError ?? "(none)");
+            return null;
+        }
+
+        return fsOutput
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Trim())
+            .FirstOrDefault(line => !string.IsNullOrWhiteSpace(line));
     }
 }

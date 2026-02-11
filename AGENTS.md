@@ -7,8 +7,7 @@ LiMount mounts Linux partitions into WSL2 and maps them as Windows drive letters
 ## Structure
 
 - **LiMount.Core** - Shared business logic (services, orchestrators, models)
-- **LiMount.App** - WPF UI (.NET 8, production-ready)
-- **LiMount.WinUI** - WinUI 3 UI (.NET 10, Windows 11, future replacement)
+- **LiMount.WinUI** - WinUI 3 UI (.NET 10, Windows 11)
 - **LiMount.Tests** - Unit and integration tests
 - **scripts/** - PowerShell scripts for mount/unmount operations
 
@@ -17,8 +16,7 @@ LiMount mounts Linux partitions into WSL2 and maps them as Windows drive letters
 ```bash
 dotnet build
 dotnet test LiMount.Tests
-dotnet run --project LiMount.App      # WPF (stable)
-dotnet run --project LiMount.WinUI    # WinUI 3 (Win11 only)
+dotnet run --project LiMount.WinUI
 ```
 
 ## Key Patterns
@@ -36,7 +34,6 @@ dotnet run --project LiMount.WinUI    # WinUI 3 (Win11 only)
 ## Detailed Docs
 
 For specialized topics, see `agent_docs/`:
-- `winui-specifics.md` - WinUI 3 vs WPF differences
 - `aot-trimming.md` - AOT/trimming constraints
 
 ---

@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     This script cleans, restores, and publishes a self-contained single-file executable
-    for the LiMount WPF application using the win-x64 publish profile.
+    for the LiMount WinUI 3 application using the win-x64 publish profile.
 
 .PARAMETER Configuration
     Build configuration to use. Default is "Release".
@@ -51,8 +51,8 @@ Write-Success "Validated project root directory"
 
 # Get absolute paths
 $projectRoot = (Get-Location).Path
-$appProject = Join-Path $projectRoot "LiMount.App\LiMount.App.csproj"
-$outputPath = Join-Path $projectRoot "LiMount.App\bin\publish\win-x64"
+$appProject = Join-Path $projectRoot "LiMount.WinUI\LiMount.WinUI.csproj"
+$outputPath = Join-Path $projectRoot "LiMount.WinUI\bin\Release\net10.0-windows10.0.26100.0\win-x64\publish"
 $artifactDir = Join-Path $projectRoot "bin"
 $platformProperty = "-p:Platform=$Platform"
 
@@ -107,7 +107,7 @@ try {
 Write-Info ""
 
 # Step 4: Display output information
-$exePath = Join-Path $outputPath "LiMount.App.exe"
+$exePath = Join-Path $outputPath "LiMount.WinUI.exe"
 
 if (Test-Path $exePath) {
     $fileInfo = Get-Item $exePath
@@ -118,7 +118,7 @@ if (Test-Path $exePath) {
         New-Item -ItemType Directory -Path $artifactDir | Out-Null
     }
 
-    $copiedExePath = Join-Path $artifactDir "LiMount.App.exe"
+    $copiedExePath = Join-Path $artifactDir "LiMount.WinUI.exe"
     Copy-Item -Path $exePath -Destination $copiedExePath -Force
     
     Write-Success "=========================================="
@@ -126,7 +126,7 @@ if (Test-Path $exePath) {
     Write-Success "=========================================="
     Write-Info ""
     Write-Info "Output location: $outputPath"
-    Write-Info "Executable: LiMount.App.exe"
+    Write-Info "Executable: LiMount.WinUI.exe"
     Write-Info "Copied artifact: $copiedExePath"
     Write-Info "File size: $fileSizeMB MB"
     Write-Info ""

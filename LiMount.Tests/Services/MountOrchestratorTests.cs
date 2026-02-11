@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 using Moq;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
@@ -166,7 +167,7 @@ public class MountOrchestratorTests
             s => s.ExecuteUnmountScriptAsync(1, It.IsAny<CancellationToken>()),
             Times.Once);
         _mockMountStateService.Verify(
-            s => s.UnregisterMountAsync(1, It.IsAny<CancellationToken>()),
+            s => s.UnregisterMountAsync(1, 1, It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -340,22 +341,22 @@ public class MountOrchestratorTests
             s => s.ExecuteUnmountScriptAsync(1, It.IsAny<CancellationToken>()),
             Times.Once);
         _mockMountStateService.Verify(
-            s => s.UnregisterMountAsync(1, It.IsAny<CancellationToken>()),
+            s => s.UnregisterMountAsync(1, 1, It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
     [Fact]
-    public async Task MountAndMapAsync_MappingFailure_SkipsRollbackWhenExistingMountDoesNotMatch()
+    public async Task MountAndMapAsync_MappingFailure_SkipsRollbackWhenPartitionAlreadyTracked()
     {
         // Arrange
         var preExistingMount = new ActiveMount
         {
             DiskIndex = 1,
-            PartitionNumber = 9,
-            MountPathUNC = @"\\wsl$\Other\mnt\wsl\PHYSICALDRIVE1p9"
+            PartitionNumber = 1,
+            MountPathUNC = @"\\wsl$\Other\mnt\wsl\PHYSICALDRIVE1p1"
         };
         _mockMountStateService
-            .Setup(s => s.GetMountForDiskAsync(1, It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetMountForDiskPartitionAsync(1, 1, It.IsAny<CancellationToken>()))
             .ReturnsAsync(preExistingMount);
 
         var mountResult = new MountResult
@@ -389,7 +390,43 @@ public class MountOrchestratorTests
             s => s.ExecuteUnmountScriptAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _mockMountStateService.Verify(
-            s => s.UnregisterMountAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            s => s.UnregisterMountAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task MountAndMapAsync_MappingFailure_SkipsRollbackWhenMountWasAlreadyPresentInWsl()
+    {
+        var mountResult = new MountResult
+        {
+            Success = true,
+            AlreadyMounted = true,
+            DistroName = "Ubuntu",
+            MountPathLinux = "/mnt/wsl/PHYSICALDRIVE1p1",
+            MountPathUNC = _existingUncPath
+        };
+        _mockMountScriptService
+            .Setup(e => e.ExecuteMountScriptAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mountResult);
+
+        _mockDriveMappingService
+            .Setup(e => e.ExecuteMappingScriptAsync(It.IsAny<char>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MappingResult
+            {
+                Success = false,
+                ErrorMessage = "Drive letter already in use"
+            });
+
+        var result = await _orchestrator.MountAndMapAsync(1, 1, 'Z');
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("cleanup");
+        result.ErrorMessage.Should().Contain("already mounted");
+        _mockMountScriptService.Verify(
+            s => s.ExecuteUnmountScriptAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _mockMountStateService.Verify(
+            s => s.UnregisterMountAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -419,7 +456,7 @@ public class MountOrchestratorTests
             s => s.ExecuteUnmountScriptAsync(1, It.IsAny<CancellationToken>()),
             Times.Once);
         _mockMountStateService.Verify(
-            s => s.UnregisterMountAsync(1, It.IsAny<CancellationToken>()),
+            s => s.UnregisterMountAsync(1, 1, It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -492,5 +529,30 @@ public class MountOrchestratorTests
         _mockMountStateService.Verify(
             s => s.RegisterMountAsync(It.IsAny<ActiveMount>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    [Fact]
+    public void Constructor_UsesDedicatedUncExistenceTimeoutSetting()
+    {
+        var config = Options.Create(new LiMountConfiguration
+        {
+            MountOperations = new MountOperationsConfig
+            {
+                UncAccessibilityRetries = 1,
+                UncAccessibilityDelayMs = 777,
+                UncExistenceCheckTimeoutMs = 2345
+            }
+        });
+
+        var orchestrator = new MountOrchestrator(
+            _mockMountScriptService.Object,
+            _mockDriveMappingService.Object,
+            config,
+            _mockHistoryService.Object,
+            _mockMountStateService.Object);
+
+        var timeoutField = typeof(MountOrchestrator).GetField("_uncExistenceTimeoutMs", BindingFlags.Instance | BindingFlags.NonPublic);
+        timeoutField.Should().NotBeNull();
+        timeoutField!.GetValue(orchestrator).Should().Be(2345);
     }
 }

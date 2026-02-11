@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using Microsoft.Extensions.Logging;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
 
@@ -13,6 +14,7 @@ public class UnmountOrchestrator : IUnmountOrchestrator
     private readonly IMountScriptService _mountScriptService;
     private readonly IDriveMappingService _driveMappingService;
     private readonly IMountHistoryService? _historyService;
+    private readonly ILogger<UnmountOrchestrator>? _logger;
 
     /// <summary>
     /// Initializes a new instance of UnmountOrchestrator with the provided services.
@@ -20,17 +22,20 @@ public class UnmountOrchestrator : IUnmountOrchestrator
     /// <param name="mountScriptService">Service for executing unmount scripts.</param>
     /// <param name="driveMappingService">Service for drive letter unmapping operations.</param>
     /// <param name="historyService">Optional history service for tracking unmount operations.</param>
+    /// <param name="logger">Optional logger for diagnostic information.</param>
     /// <exception cref="ArgumentNullException">Thrown when required parameters are null.</exception>
     public UnmountOrchestrator(
         IMountScriptService mountScriptService,
         IDriveMappingService driveMappingService,
-        IMountHistoryService? historyService = null)
+        IMountHistoryService? historyService = null,
+        ILogger<UnmountOrchestrator>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(mountScriptService);
         ArgumentNullException.ThrowIfNull(driveMappingService);
         _mountScriptService = mountScriptService;
         _driveMappingService = driveMappingService;
         _historyService = historyService;
+        _logger = logger;
     }
 
     /// <summary>
@@ -92,16 +97,27 @@ public class UnmountOrchestrator : IUnmountOrchestrator
 
         if (!unmountResult.Success)
         {
-            progress?.Report($"Unmount failed: {unmountResult.ErrorMessage}");
-            var failureResult = UnmountAndUnmapResult.CreateFailure(
-                diskIndex,
-                unmountResult.ErrorMessage ?? "Unknown error during unmount",
-                "unmount");
+            if (IsAlreadyDetachedUnmountError(unmountResult.ErrorMessage))
+            {
+                _logger?.LogInformation(
+                    "Unmount reported already-detached state for disk {DiskIndex}. Treating as success. Message: {Message}",
+                    diskIndex,
+                    unmountResult.ErrorMessage);
+                progress?.Report("Disk is already detached from WSL. Continuing cleanup.");
+            }
+            else
+            {
+                progress?.Report($"Unmount failed: {unmountResult.ErrorMessage}");
+                var failureResult = UnmountAndUnmapResult.CreateFailure(
+                    diskIndex,
+                    unmountResult.ErrorMessage ?? "Unknown error during unmount",
+                    "unmount");
 
-            // Log failure to history (best-effort)
-            await LogToHistoryAsync(failureResult, cancellationToken);
+                // Log failure to history (best-effort)
+                await LogToHistoryAsync(failureResult, cancellationToken);
 
-            return failureResult;
+                return failureResult;
+            }
         }
 
         progress?.Report("Disk unmounted successfully from WSL");
@@ -130,6 +146,20 @@ public class UnmountOrchestrator : IUnmountOrchestrator
         return result;
     }
 
+    private static bool IsAlreadyDetachedUnmountError(string? errorMessage)
+    {
+        if (string.IsNullOrWhiteSpace(errorMessage))
+        {
+            return false;
+        }
+
+        return errorMessage.Contains("not currently attached", StringComparison.OrdinalIgnoreCase)
+            || errorMessage.Contains("not mounted", StringComparison.OrdinalIgnoreCase)
+            || errorMessage.Contains("ERROR_FILE_NOT_FOUND", StringComparison.OrdinalIgnoreCase)
+            || errorMessage.Contains("The system cannot find the file specified", StringComparison.OrdinalIgnoreCase)
+            || errorMessage.Contains("Wsl/Service/DetachDisk", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// Logs the operation result to history service in a best-effort manner.
     /// Exceptions from the history service are caught and logged but do not fail the operation.
@@ -148,8 +178,7 @@ public class UnmountOrchestrator : IUnmountOrchestrator
         catch (Exception ex)
         {
             // History logging is best-effort - don't fail the operation
-            // In a real implementation, you'd use ILogger here
-            System.Diagnostics.Debug.WriteLine($"Failed to log to history: {ex.Message}");
+            _logger?.LogWarning(ex, "Failed to log unmount operation to history for disk {DiskIndex}", result.DiskIndex);
         }
     }
 }

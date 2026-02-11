@@ -1,6 +1,6 @@
 # LiMount
 
-**LiMount** is a Windows desktop application that simplifies mounting Linux disk partitions into WSL2 and mapping them as Windows drive letters. Built with C# WPF (.NET 8) and PowerShell, LiMount provides a clean, modern GUI for managing WSL disk mounts.
+**LiMount** is a Windows desktop application that simplifies mounting Linux disk partitions into WSL2 and mapping them as Windows drive letters. Built with C# WinUI 3 (.NET 10) and PowerShell, LiMount provides a clean, modern GUI for managing WSL disk mounts.
 
 ## Features
 
@@ -9,7 +9,7 @@
 - **Safety Checks**: Prevents mounting system or boot disks
 - **WSL2 Integration**: Uses `wsl --mount` to mount Linux partitions
 - **Drive Mapping**: Maps WSL UNC paths to Windows drive letters for easy access
-- **Modern UI**: Clean, intuitive WPF interface with real-time status updates
+- **Modern UI**: Clean, intuitive WinUI 3 interface with real-time status updates
 - **Explorer Integration**: Opens mounted drives directly in Windows Explorer
 
 ## Requirements
@@ -24,7 +24,7 @@
 
 ### Development Requirements
 
-- **.NET SDK 10.0.101+**: `global.json` pins to 10.0.101 with `rollForward: latestPatch` (builds both the .NET 8 WPF app and the .NET 10 WinUI app)
+- **.NET SDK 10.0.101+**: `global.json` pins to 10.0.101 with `rollForward: latestPatch`
 - **Visual Studio 2022** or **Visual Studio Code** (optional, for development)
 
 ## Project Structure
@@ -56,13 +56,14 @@ limount/
 │       ├── ScriptExecutor.cs
 │       ├── MountOrchestrator.cs
 │       └── UnmountOrchestrator.cs
-├── LiMount.App/                     # WPF application (.NET 8)
+├── LiMount.WinUI/                   # WinUI 3 application (.NET 10)
 │   ├── ViewModels/                  # MVVM ViewModels
 │   │   └── MainViewModel.cs
+│   ├── Views/                       # UI views
+│   │   ├── MainPage.xaml
+│   │   └── HistoryPage.xaml
+│   ├── Services/                    # Platform-specific services
 │   ├── Converters/                  # Value converters
-│   │   └── InverseBooleanConverter.cs
-│   ├── MainWindow.xaml
-│   ├── MainWindow.xaml.cs
 │   ├── App.xaml
 │   └── App.xaml.cs
 └── scripts/                         # PowerShell helper scripts
@@ -76,7 +77,7 @@ limount/
 
 ### Prerequisites
 
-1. Install [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+1. Install [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
 2. Ensure WSL2 is installed and configured on your Windows system
 
 ### Build Steps
@@ -99,30 +100,65 @@ limount/
 
 4. **Run the application**
    ```bash
-   dotnet run --project LiMount.App
+   dotnet run --project LiMount.WinUI
    ```
 
    Or navigate to the build output:
    ```bash
-   cd LiMount.App/bin/Release/net8.0-windows
-   ./LiMount.App.exe
+   cd LiMount.WinUI/bin/x64/Release/net10.0-windows10.0.26100.0/win-x64
+   ./LiMount.WinUI.exe
    ```
 
-### Publish Matrix
+### Publish
 
-| UI stack | Mode        | Command                                                                                                  | Output                                                  |
-|----------|-------------|-----------------------------------------------------------------------------------------------------------|---------------------------------------------------------|
-| WPF      | ReadyToRun  | `.\scripts\publish-wpf-r2r.ps1`                                                                          | `LiMount.App/bin/publish/win-x64/`                     |
-| WinUI 3  | NativeAOT   | `.\scripts\publish-winui-aot.ps1` (requires .NET SDK 8.0.402+, WinSDK/MSVC already installed)            | `LiMount.WinUI/bin/Release/net8.0-windows10.0.22621.0/win-x64/publish/` |
+```bash
+.\build-release.ps1
+```
 
-Known warnings on WinUI AOT: trim/AOT analysis from Serilog and WebView2 (transitive via WinAppSDK); build still succeeds.
+Output: `LiMount.WinUI/bin/publish/win-x64/LiMount.WinUI.exe`
+
+## Automated Testing
+
+### Unit and service tests
+
+```bash
+dotnet test LiMount.Tests
+```
+
+### Deterministic UI automation (FlaUI + test mode)
+
+LiMount includes an app test mode that replaces live WSL/disk services with deterministic fakes.
+
+```powershell
+$env:LIMOUNT_RUN_UI_TESTS='1'
+dotnet test LiMount.UITests
+Remove-Item Env:\LIMOUNT_RUN_UI_TESTS
+```
+
+Optional visual artifact capture during UI tests:
+
+```powershell
+$env:LIMOUNT_RUN_UI_TESTS='1'
+$env:LIMOUNT_CAPTURE_SCREENSHOT='1'
+dotnet test LiMount.UITests
+Remove-Item Env:\LIMOUNT_RUN_UI_TESTS
+Remove-Item Env:\LIMOUNT_CAPTURE_SCREENSHOT
+```
+
+### Hardware-in-loop mount regression test (real WSL + disk)
+
+Use this only on a machine with admin privileges and an explicitly chosen test disk/partition:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-hil-mount-test.ps1 -DiskIndex 1 -Partition 2 -ExpectXfsUnsupported
+```
 
 ## Usage
 
 ### Basic Workflow
 
 1. **Launch LiMount**
-   - Run `LiMount.App.exe`
+   - Run `LiMount.WinUI.exe`
    - The application will enumerate available disks and partitions
 
 2. **Select Disk**
@@ -202,10 +238,10 @@ MappedTo=\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE2p1
 
 ### Technologies Used
 
-- **C# / .NET 8**: Core language and runtime (LTS)
-  - **Target Framework**: `net8.0-windows` (Windows-specific)
-  - Both LiMount.Core and LiMount.App target Windows-only APIs
-- **WPF (Windows Presentation Foundation)**: UI framework
+- **C# / .NET 10**: Core language and runtime
+  - **Target Framework**: `net10.0-windows10.0.26100.0` (Windows 11)
+  - LiMount.Core targets `net8.0-windows`, LiMount.WinUI targets .NET 10
+- **WinUI 3**: Modern Windows UI framework (Windows App SDK)
 - **CommunityToolkit.Mvvm**: MVVM helpers (RelayCommand, ObservableProperty)
 - **System.Management**: WMI access for disk enumeration (Windows-only)
 - **PowerShell**: Helper scripts for WSL mounting and drive mapping
@@ -249,6 +285,16 @@ This is an MVP/prototype with the following limitations:
 - Ensure you're running Windows 11 Build 22000+ or have the Microsoft Store version of WSL installed
 - Update WSL: `wsl --update`
 
+### "wsl --mount failed (exit code 1): Invalid argument" on XFS
+
+Some XFS filesystems use feature flags newer than the currently installed WSL kernel supports. In this case LiMount now surfaces an actionable diagnostic (`XFS_UNSUPPORTED_FEATURES`) with guidance to update the WSL kernel or mount from native Linux.
+
+Validate kernel support from WSL:
+
+```bash
+wsl -e sh -lc "dmesg | tail -n 200"
+```
+
 ### "Disk X is a system or boot disk"
 
 - LiMount refuses to mount system/boot disks for safety
@@ -285,12 +331,12 @@ This is a prototype/MVP project. Contributions are welcome! Areas for improvemen
 
 - **Microsoft WSL Team**: For `wsl --mount` functionality
 - **CommunityToolkit.Mvvm**: For excellent MVVM helpers
-- **.NET Team**: For .NET 8 and WPF
+- **.NET Team**: For .NET 10 and WinUI 3
 
 ## References
 
 - [WSL2 Disk Mounting Documentation](https://learn.microsoft.com/en-us/windows/wsl/wsl2-mount-disk)
-- [.NET 8 WPF Documentation](https://learn.microsoft.com/en-us/dotnet/desktop/wpf/whats-new/net80)
+- [WinUI 3 Documentation](https://learn.microsoft.com/en-us/windows/apps/winui/winui3/)
 - [Win32_DiskDrive WMI Class](https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-diskdrive)
 - [ProcessStartInfo Documentation](https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.processstartinfo)
 

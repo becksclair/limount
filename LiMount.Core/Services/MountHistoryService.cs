@@ -83,9 +83,11 @@ public class MountHistoryService : IMountHistoryService, IDisposable
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(entry);
 
-        await _fileLock.WaitAsync(cancellationToken);
+        bool acquired = false;
         try
         {
+            await _fileLock.WaitAsync(cancellationToken);
+            acquired = true;
             var history = await LoadHistoryInternalAsync(cancellationToken);
 
             // Trim BEFORE adding to prevent temporary memory overflow
@@ -108,7 +110,7 @@ public class MountHistoryService : IMountHistoryService, IDisposable
         }
         finally
         {
-            _fileLock.Release();
+            if (acquired) _fileLock.Release();
         }
     }
 
@@ -119,9 +121,11 @@ public class MountHistoryService : IMountHistoryService, IDisposable
     {
         ThrowIfDisposed();
 
-        await _fileLock.WaitAsync(cancellationToken);
+        bool acquired = false;
         try
         {
+            await _fileLock.WaitAsync(cancellationToken);
+            acquired = true;
             var history = await LoadHistoryInternalAsync(cancellationToken);
             return history.OrderByDescending(e => e.Timestamp).ToList();
         }
@@ -132,7 +136,7 @@ public class MountHistoryService : IMountHistoryService, IDisposable
         }
         finally
         {
-            _fileLock.Release();
+            if (acquired) _fileLock.Release();
         }
     }
 
@@ -143,9 +147,11 @@ public class MountHistoryService : IMountHistoryService, IDisposable
     {
         ThrowIfDisposed();
 
-        await _fileLock.WaitAsync(cancellationToken);
+        bool acquired = false;
         try
         {
+            await _fileLock.WaitAsync(cancellationToken);
+            acquired = true;
             await SaveHistoryInternalAsync(new List<MountHistoryEntry>(), cancellationToken);
             _logger.LogInformation("Cleared mount history");
         }
@@ -155,7 +161,7 @@ public class MountHistoryService : IMountHistoryService, IDisposable
         }
         finally
         {
-            _fileLock.Release();
+            if (acquired) _fileLock.Release();
         }
     }
 
@@ -166,9 +172,11 @@ public class MountHistoryService : IMountHistoryService, IDisposable
     {
         ThrowIfDisposed();
 
-        await _fileLock.WaitAsync(cancellationToken);
+        bool acquired = false;
         try
         {
+            await _fileLock.WaitAsync(cancellationToken);
+            acquired = true;
             var history = await LoadHistoryInternalAsync(cancellationToken);
 
             // Single-pass iteration to find the most recent matching entry (O(n) instead of O(n log n))
@@ -196,7 +204,7 @@ public class MountHistoryService : IMountHistoryService, IDisposable
         }
         finally
         {
-            _fileLock.Release();
+            if (acquired) _fileLock.Release();
         }
     }
 

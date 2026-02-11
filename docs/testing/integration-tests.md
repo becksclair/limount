@@ -1,6 +1,6 @@
 # Integration Testing Guide for LiMount
 
-This document describes integration testing for LiMount. Since LiMount is a Windows-only WPF application that interacts with WSL, WMI, and PowerShell, comprehensive integration testing requires a Windows environment.
+This document describes integration testing for LiMount. Since LiMount is a Windows-only WinUI 3 application that interacts with WSL, WMI, and PowerShell, comprehensive integration testing requires a Windows environment.
 
 ---
 
@@ -40,7 +40,33 @@ dotnet test --collect:"XCode Code Coverage"
 
 ---
 
-### Integration Tests (Manual, Windows-Only)
+### UI Automation Tests (Automated, Windows-only runner)
+
+**Project**: `LiMount.UITests/`  
+**Framework**: xUnit + FlaUI UIA3  
+**Mode**: deterministic test mode via environment variables
+
+**Enable and run**:
+```powershell
+$env:LIMOUNT_RUN_UI_TESTS='1'
+dotnet test LiMount.UITests
+Remove-Item Env:\LIMOUNT_RUN_UI_TESTS
+```
+
+Optional screenshot artifacts while tests run:
+```powershell
+$env:LIMOUNT_RUN_UI_TESTS='1'
+$env:LIMOUNT_CAPTURE_SCREENSHOT='1'
+dotnet test LiMount.UITests
+Remove-Item Env:\LIMOUNT_RUN_UI_TESTS
+Remove-Item Env:\LIMOUNT_CAPTURE_SCREENSHOT
+```
+
+**Scenarios covered**:
+- Simulated unsupported XFS mount shows actionable diagnostic text (`XFS_UNSUPPORTED_FEATURES`)
+- Simulated success flow shows mounted-success status text
+
+### Integration Tests (Hardware-in-loop, Windows-only)
 
 **Environment**: Windows 11 (Build 22000+) with WSL2 installed
 **Coverage**: End-to-end workflows, PowerShell scripts, WMI queries, actual mounting
@@ -55,12 +81,27 @@ dotnet test --collect:"XCode Code Coverage"
 - History logging
 - UI workflows
 
-**Why not automated?**
-- Requires Administrator elevation (can't automate UAC)
-- Requires WSL2 with at least one distro installed
-- Requires physical or virtual disks to mount
-- WPF UI testing requires Windows
-- PowerShell execution is OS-specific
+**Why this remains semi-automated?**
+- Requires local Windows + WSL2 and access to a real test disk/partition
+- Uses real OS state and hardware, not pure mocks
+- Still depends on environment-specific disk contents and kernel capabilities
+
+Run the hardware-in-loop helper:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-hil-mount-test.ps1 -DiskIndex 1 -Partition 2 -ExpectXfsUnsupported
+```
+
+Run a full drive-level verification (expected failure + required success mount/unmount on another partition):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-hil-mount-test.ps1 -DiskIndex 1 -VerifyDriveEndToEnd -FailurePartition 2
+```
+
+Notes:
+- The runner sets `LIMOUNT_REQUIRE_HIL=1`, so integration tests fail instead of silently skipping.
+- The runner sets `LIMOUNT_SKIP_SCRIPT_ELEVATION=0` by default, so it validates the normal elevated script path.
+- Use `-SkipScriptElevation` only when direct non-elevated `wsl --mount` is allowed in your environment.
 
 ---
 
@@ -73,8 +114,7 @@ dotnet test --collect:"XCode Code Coverage"
 **Prerequisites**:
 - Windows 11 with WSL2 installed
 - At least one WSL distro (Ubuntu recommended)
-- External USB drive or virtual disk with Linux partition (ext4)
-- Administrator privileges
+- External USB drive or virtual disk with a mountable Linux partition (for success path)
 
 **Steps**:
 1. Launch LiMount application
@@ -381,10 +421,10 @@ Get-Content "$env:LocalAppData\LiMount\logs\limount-*.log" | Select-Object -Firs
 **Validation**:
 ```powershell
 # Verify config file exists
-Test-Path ".\LiMount.App\appsettings.json"
+Test-Path ".\LiMount.WinUI\appsettings.json"
 
 # Verify config is valid JSON
-Get-Content ".\LiMount.App\appsettings.json" | ConvertFrom-Json
+Get-Content ".\LiMount.WinUI\appsettings.json" | ConvertFrom-Json
 ```
 
 ---
@@ -524,7 +564,7 @@ Due to Windows-specific dependencies, these scenarios are NOT covered by automat
 | WSL mount/unmount | Requires actual WSL2 | Manual testing with WSL |
 | Drive letter mapping | Windows-specific API | Manual testing on Windows |
 | UNC path accessibility | Requires WSL running | Manual testing with WSL |
-| WPF UI interactions | Requires Windows + UI automation | Manual UI testing |
+| WinUI 3 UI interactions | Requires Windows + UI automation | Manual UI testing |
 
 **Best Practice**: Maximize unit test coverage (85%+) to catch logic errors, rely on manual integration tests for Windows-specific operations.
 

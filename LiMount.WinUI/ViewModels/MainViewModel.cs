@@ -13,41 +13,46 @@ namespace LiMount.WinUI.ViewModels;
 /// WinUI-specific MainViewModel implementation.
 /// Inherits all shared logic from BaseMainViewModel and provides platform-specific overrides.
 /// </summary>
-public partial class MainViewModel : BaseMainViewModel
+public partial class MainViewModel(
+    MainViewModel.MountingServices mountingServices,
+    MainViewModel.AppServices appServices,
+    Func<HistoryWindow> historyWindowFactory,
+    IUiDispatcher uiDispatcher)
+    : BaseMainViewModel(CreateDependencies(mountingServices, appServices))
 {
-    private readonly IUiDispatcher _uiDispatcher;
-    private readonly Func<HistoryWindow> _historyWindowFactory;
+    private readonly IUiDispatcher _uiDispatcher = uiDispatcher ?? throw new ArgumentNullException(nameof(uiDispatcher));
+    private readonly Func<HistoryWindow> _historyWindowFactory = historyWindowFactory ?? throw new ArgumentNullException(nameof(historyWindowFactory));
 
-    /// <summary>
-    /// Initializes a new instance of MainViewModel with all required services.
-    /// </summary>
-    public MainViewModel(
-        IDiskEnumerationService diskService,
-        IDriveLetterService driveLetterService,
-        IMountOrchestrator mountOrchestrator,
-        IUnmountOrchestrator unmountOrchestrator,
-        IMountStateService mountStateService,
-        IEnvironmentValidationService environmentValidationService,
-        IFilesystemDetectionService filesystemDetectionService,
-        IDialogService dialogService,
-        Func<HistoryWindow> historyWindowFactory,
-        ILogger<MainViewModel> logger,
-        IOptions<LiMountConfiguration> config,
-        IUiDispatcher uiDispatcher)
-        : base(
-            diskService,
-            driveLetterService,
-            mountOrchestrator,
-            unmountOrchestrator,
-            mountStateService,
-            environmentValidationService,
-            filesystemDetectionService,
-            dialogService,
-            logger,
-            config.Value)
+    public sealed record MountingServices(
+        IDiskEnumerationService DiskService,
+        IDriveLetterService DriveLetterService,
+        IMountOrchestrator MountOrchestrator,
+        IUnmountOrchestrator UnmountOrchestrator,
+        IMountStateService MountStateService,
+        IFilesystemDetectionService FilesystemDetectionService);
+
+    public sealed record AppServices(
+        IEnvironmentValidationService EnvironmentValidationService,
+        IDialogService DialogService,
+        ILogger<MainViewModel> Logger,
+        IOptions<LiMountConfiguration> Config);
+
+    private static Dependencies CreateDependencies(MainViewModel.MountingServices mountingServices, MainViewModel.AppServices appServices)
     {
-        _historyWindowFactory = historyWindowFactory ?? throw new ArgumentNullException(nameof(historyWindowFactory));
-        _uiDispatcher = uiDispatcher ?? throw new ArgumentNullException(nameof(uiDispatcher));
+        var safeMountingServices = mountingServices ?? throw new ArgumentNullException(nameof(mountingServices));
+        var safeAppServices = appServices ?? throw new ArgumentNullException(nameof(appServices));
+
+        return new Dependencies(
+            safeMountingServices.DiskService,
+            safeMountingServices.DriveLetterService,
+            safeMountingServices.MountOrchestrator,
+            safeMountingServices.UnmountOrchestrator,
+            safeMountingServices.MountStateService,
+            safeAppServices.EnvironmentValidationService,
+            safeMountingServices.FilesystemDetectionService,
+            safeAppServices.DialogService,
+            safeAppServices.Logger,
+            safeAppServices.Config.Value);
     }
 
     /// <inheritdoc/>

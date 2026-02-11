@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
@@ -17,9 +18,11 @@ public class MountOrchestrator : IMountOrchestrator
     private readonly IDriveMappingService _driveMappingService;
     private readonly IMountHistoryService? _historyService;
     private readonly IMountStateService? _mountStateService;
+    private readonly ILogger<MountOrchestrator>? _logger;
     private readonly MountOperationsConfig _config;
     private readonly int _validatedUncRetries;
     private readonly int _validatedUncDelayMs;
+    private readonly int _uncExistenceTimeoutMs;
     private readonly int _rollbackTimeoutMs;
     private const double UncJitterRatio = 0.2; // ±20% bounded jitter for UNC waits
     private const int UncBackoffCapMultiplier = 8; // cap at 8x base delay
@@ -31,13 +34,16 @@ public class MountOrchestrator : IMountOrchestrator
     /// <param name="driveMappingService">Service for drive letter mapping operations.</param>
     /// <param name="config">Configuration for mount operations.</param>
     /// <param name="historyService">Optional history service for tracking mount operations.</param>
+    /// <param name="mountStateService">Optional state service for tracking active mounts.</param>
+    /// <param name="logger">Optional logger for diagnostic information.</param>
     /// <exception cref="ArgumentNullException">Thrown when required parameters are null.</exception>
     public MountOrchestrator(
         IMountScriptService mountScriptService,
         IDriveMappingService driveMappingService,
         IOptions<LiMountConfiguration> config,
         IMountHistoryService? historyService = null,
-        IMountStateService? mountStateService = null)
+        IMountStateService? mountStateService = null,
+        ILogger<MountOrchestrator>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(mountScriptService);
         ArgumentNullException.ThrowIfNull(driveMappingService);
@@ -47,11 +53,13 @@ public class MountOrchestrator : IMountOrchestrator
         _config = config.Value.MountOperations;
         _historyService = historyService;
         _mountStateService = mountStateService;
+        _logger = logger;
 
         // Validate and clamp UNC retry configuration to prevent unsafe values
         _validatedUncRetries = Math.Max(0, Math.Min(100, _config.UncAccessibilityRetries));
         _validatedUncDelayMs = Math.Max(10, Math.Min(5000, _config.UncAccessibilityDelayMs));
-        _rollbackTimeoutMs = Math.Max(500, Math.Min(10000, _config.WslCommandTimeoutMs));
+        _uncExistenceTimeoutMs = Math.Max(100, Math.Min(30000, _config.UncExistenceCheckTimeoutMs));
+        _rollbackTimeoutMs = Math.Max(500, Math.Min(10000, _config.RollbackTimeoutMs));
     }
 
     /// <summary>
@@ -99,18 +107,23 @@ public class MountOrchestrator : IMountOrchestrator
 
         progress?.Report($"Starting mount operation for disk {diskIndex} partition {partition}...");
 
-        ActiveMount? existingMountForDisk = null;
+        ActiveMount? existingMountForPartition = null;
         ActiveMount? existingMountForDriveLetter = null;
         if (_mountStateService != null)
         {
             try
             {
-                existingMountForDisk = await _mountStateService.GetMountForDiskAsync(diskIndex, cancellationToken);
+                existingMountForPartition = await _mountStateService.GetMountForDiskPartitionAsync(diskIndex, partition, cancellationToken);
                 existingMountForDriveLetter = await _mountStateService.GetMountForDriveLetterAsync(driveLetter, cancellationToken);
             }
-            catch
+            catch (OperationCanceledException)
             {
-                // Best-effort: ignore mount state lookup failures to avoid blocking the workflow.
+                throw; // Let cancellation propagate
+            }
+            catch (Exception ex)
+            {
+                // Best-effort: mount state lookup failure should not block the workflow
+                _logger?.LogWarning(ex, "Mount state lookup failed for disk {DiskIndex} / drive {DriveLetter}; proceeding without conflict detection", diskIndex, driveLetter);
             }
         }
 
@@ -162,11 +175,68 @@ public class MountOrchestrator : IMountOrchestrator
 
         if (!mountResult.Success)
         {
-            progress?.Report($"Mount failed: {mountResult.ErrorMessage}");
+            _logger?.LogWarning(
+                "Mount failed for disk {DiskIndex} partition {Partition}. ErrorCode={ErrorCode}, ErrorHint={ErrorHint}, DmesgSummary={DmesgSummary}, Error={Error}",
+                diskIndex,
+                partition,
+                mountResult.ErrorCode ?? "(none)",
+                mountResult.ErrorHint ?? "(none)",
+                mountResult.DmesgSummary ?? "(none)",
+                mountResult.ErrorMessage ?? "(none)");
+
+            var originalMountResult = mountResult;
+            if (ShouldRetryWithAuto(fsType, mountResult))
+            {
+                progress?.Report("Mount failed with explicit filesystem type. Retrying once with auto-detection...");
+                await TryBestEffortUnmountBeforeRetryAsync(diskIndex);
+
+                try
+                {
+                    var retryResult = await _mountScriptService.ExecuteMountScriptAsync(
+                        diskIndex,
+                        partition,
+                        "auto",
+                        distroName,
+                        cancellationToken);
+
+                    if (retryResult.Success)
+                    {
+                        progress?.Report("Mount retry with auto-detection succeeded.");
+                        mountResult = retryResult;
+                    }
+                    else
+                    {
+                        _logger?.LogWarning(
+                            "Mount retry with auto-detection also failed. ErrorCode={ErrorCode}, ErrorHint={ErrorHint}, DmesgSummary={DmesgSummary}, Error={Error}",
+                            retryResult.ErrorCode ?? "(none)",
+                            retryResult.ErrorHint ?? "(none)",
+                            retryResult.DmesgSummary ?? "(none)",
+                            retryResult.ErrorMessage ?? "(none)");
+
+                        mountResult = SelectDiagnosticResult(originalMountResult, retryResult);
+                        mountResult.ErrorMessage = BuildRetryFailureDetails(fsType, originalMountResult, retryResult);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    return MountAndMapResult.CreateFailure(
+                        diskIndex,
+                        partition,
+                        "Operation canceled during mount retry.",
+                        "mount");
+                }
+            }
+        }
+
+        if (!mountResult.Success)
+        {
+            var failureMessage = BuildUserFacingMountErrorMessage(mountResult);
+            progress?.Report($"Mount failed: {failureMessage}");
+
             var failureResult = MountAndMapResult.CreateFailure(
                 diskIndex,
                 partition,
-                mountResult.ErrorMessage ?? "Unknown error during mount",
+                failureMessage,
                 "mount");
 
             await LogToHistoryAsync(failureResult, cancellationToken);
@@ -189,7 +259,7 @@ public class MountOrchestrator : IMountOrchestrator
                 diskIndex,
                 partition,
                 mountResult,
-                existingMountForDisk,
+                existingMountForPartition,
                 progress,
                 CancellationToken.None);
             failureResult.ErrorMessage = AppendCleanupNote(failureResult.ErrorMessage, cleanupNote);
@@ -213,7 +283,7 @@ public class MountOrchestrator : IMountOrchestrator
                 diskIndex,
                 partition,
                 mountResult,
-                existingMountForDisk,
+                existingMountForPartition,
                 progress,
                 CancellationToken.None);
             failureResult.ErrorMessage = AppendCleanupNote(failureResult.ErrorMessage, cleanupNote);
@@ -246,7 +316,7 @@ public class MountOrchestrator : IMountOrchestrator
                 diskIndex,
                 partition,
                 mountResult,
-                existingMountForDisk,
+                existingMountForPartition,
                 progress,
                 CancellationToken.None);
             failureResult.ErrorMessage = AppendCleanupNote(failureResult.ErrorMessage, cleanupNote);
@@ -268,7 +338,7 @@ public class MountOrchestrator : IMountOrchestrator
                 diskIndex,
                 partition,
                 mountResult,
-                existingMountForDisk,
+                existingMountForPartition,
                 progress,
                 CancellationToken.None);
             failureResult.ErrorMessage = AppendCleanupNote(failureResult.ErrorMessage, cleanupNote);
@@ -297,9 +367,15 @@ public class MountOrchestrator : IMountOrchestrator
                 var activeMount = CreateActiveMountFromResult(result);
                 await _mountStateService.RegisterMountAsync(activeMount, cancellationToken);
             }
-            catch
+            catch (OperationCanceledException)
             {
-                // Best effort: state persistence should not fail the operation
+                // Don't let cancellation fail the operation - mount already succeeded
+                _logger?.LogDebug("State persistence cancelled for disk {DiskIndex}; mount succeeded", diskIndex);
+            }
+            catch (Exception ex)
+            {
+                // Best effort: state persistence should not fail the operation, but log for diagnostics
+                _logger?.LogWarning(ex, "Failed to persist mount state for disk {DiskIndex}; mount succeeded but state may be inconsistent", diskIndex);
             }
         }
 
@@ -312,13 +388,14 @@ public class MountOrchestrator : IMountOrchestrator
         int diskIndex,
         int partition,
         MountResult mountResult,
-        ActiveMount? existingMountForDisk,
+        ActiveMount? existingMountForPartition,
         IProgress<string>? progress,
         CancellationToken cancellationToken)
     {
-        if (!ShouldAttemptRollback(existingMountForDisk, partition, mountResult))
+        var rollbackSkipReason = GetRollbackSkipReason(existingMountForPartition, mountResult);
+        if (!string.IsNullOrEmpty(rollbackSkipReason))
         {
-            return "Cleanup skipped because an existing mount for this disk does not match the current operation.";
+            return rollbackSkipReason;
         }
 
         progress?.Report("Attempting rollback unmount...");
@@ -344,11 +421,17 @@ public class MountOrchestrator : IMountOrchestrator
             {
                 try
                 {
-                    await _mountStateService.UnregisterMountAsync(diskIndex, cancellationToken);
+                    await _mountStateService.UnregisterMountAsync(diskIndex, partition, cancellationToken);
                 }
-                catch
+                catch (OperationCanceledException)
+                {
+                    // Don't let cancellation fail rollback cleanup
+                    _logger?.LogDebug("State cleanup cancelled during rollback for disk {DiskIndex}", diskIndex);
+                }
+                catch (Exception ex)
                 {
                     // Best effort: state cleanup failure should not mask original failure
+                    _logger?.LogWarning(ex, "Failed to unregister mount state during rollback for disk {DiskIndex}", diskIndex);
                 }
             }
 
@@ -359,38 +442,20 @@ public class MountOrchestrator : IMountOrchestrator
         return unmountResult.ErrorMessage ?? "Rollback unmount failed for an unknown reason.";
     }
 
-    private static bool ShouldAttemptRollback(ActiveMount? existingMountForDisk, int partition, MountResult mountResult)
+    private static string? GetRollbackSkipReason(ActiveMount? existingMountForPartition, MountResult mountResult)
     {
-        if (existingMountForDisk == null)
+        if (mountResult.AlreadyMounted)
         {
-            return true;
+            return "Cleanup skipped because the target partition was already mounted before this operation.";
         }
 
-        if (existingMountForDisk.PartitionNumber != partition)
+        if (existingMountForPartition != null)
         {
-            return false;
+            return "Cleanup skipped because an existing state entry for this disk/partition was present before this operation.";
         }
 
-        if (!string.IsNullOrWhiteSpace(existingMountForDisk.MountPathUNC) &&
-            !string.IsNullOrWhiteSpace(mountResult.MountPathUNC))
-        {
-            return string.Equals(
-                existingMountForDisk.MountPathUNC,
-                mountResult.MountPathUNC,
-                StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (!string.IsNullOrWhiteSpace(existingMountForDisk.MountPathLinux) &&
-            !string.IsNullOrWhiteSpace(mountResult.MountPathLinux))
-        {
-            return string.Equals(
-                existingMountForDisk.MountPathLinux,
-                mountResult.MountPathLinux,
-                StringComparison.OrdinalIgnoreCase);
-        }
-
-        // Fallback: allow rollback if disk/partition matches but paths are missing/empty.
-        return true;
+        // This operation appears to have mounted a previously unmounted partition.
+        return null;
     }
 
     private string AppendCleanupNote(string? baseMessage, string? cleanupNote)
@@ -423,7 +488,7 @@ public class MountOrchestrator : IMountOrchestrator
     {
         if (attemptCount <= 0)
         {
-            return Directory.Exists(uncPath);
+            return await CheckDirectoryExistsWithTimeoutAsync(uncPath, _uncExistenceTimeoutMs, cancellationToken);
         }
 
         var delayMs = _validatedUncDelayMs;
@@ -431,7 +496,9 @@ public class MountOrchestrator : IMountOrchestrator
         for (int attempt = 0; attempt < attemptCount; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (Directory.Exists(uncPath))
+
+            // Use timeout-protected check to avoid blocking on dead UNC paths
+            if (await CheckDirectoryExistsWithTimeoutAsync(uncPath, _uncExistenceTimeoutMs, cancellationToken))
             {
                 return true;
             }
@@ -445,6 +512,38 @@ public class MountOrchestrator : IMountOrchestrator
             }
         }
 
+        return false;
+    }
+
+    /// <summary>
+    /// Checks if a directory exists with timeout protection.
+    /// Directory.Exists() can block indefinitely on dead UNC paths (30-60s+).
+    /// This method wraps the check with a timeout to prevent UI freezes.
+    /// </summary>
+    /// <remarks>
+    /// Note: The underlying I/O operation cannot be truly cancelled. If timeout occurs,
+    /// the background task continues running but we return false immediately.
+    /// Uses Task.WhenAny pattern since Directory.Exists() is not cancellable.
+    /// </remarks>
+    private static async Task<bool> CheckDirectoryExistsWithTimeoutAsync(string path, int timeoutMs, CancellationToken cancellationToken)
+    {
+        // Check for external cancellation first
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Don't pass cancellation token to Task.Run - Directory.Exists() is not cancellable anyway
+        var checkTask = Task.Run(() => Directory.Exists(path));
+        var timeoutTask = Task.Delay(timeoutMs, CancellationToken.None);
+
+        var completedTask = await Task.WhenAny(checkTask, timeoutTask);
+
+        if (completedTask == checkTask)
+        {
+            // Completed before timeout - return result
+            return await checkTask;
+        }
+
+        // Timeout occurred - path is likely inaccessible
+        // Note: The checkTask continues running in background (unavoidable for blocking I/O)
         return false;
     }
 
@@ -480,9 +579,9 @@ public class MountOrchestrator : IMountOrchestrator
             DistroName = result.DistroName ?? string.Empty,
             MountPathLinux = result.MountPathLinux ?? string.Empty,
             MountPathUNC = result.MountPathUNC ?? string.Empty,
-            MountedAt = DateTime.Now,
+            MountedAt = DateTime.UtcNow,
             IsVerified = true,
-            LastVerified = DateTime.Now
+            LastVerified = DateTime.UtcNow
         };
     }
 
@@ -497,5 +596,69 @@ public class MountOrchestrator : IMountOrchestrator
         var min = Math.Max(1, baseDelayMs - spread);
         var max = baseDelayMs + spread + 1; // upper bound is exclusive
         return Random.Shared.Next(min, max);
+    }
+
+    private async Task TryBestEffortUnmountBeforeRetryAsync(int diskIndex)
+    {
+        try
+        {
+            await _mountScriptService.ExecuteUnmountScriptAsync(diskIndex, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug(ex, "Best-effort unmount before retry failed for disk {DiskIndex}", diskIndex);
+        }
+    }
+
+    private static bool ShouldRetryWithAuto(string fsType, MountResult mountResult)
+    {
+        if (string.Equals(fsType, "auto", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.Equals(mountResult.ErrorCode, "XFS_UNSUPPORTED_FEATURES", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return string.Equals(mountResult.ErrorCode, "MOUNT_INVALID_ARGUMENT", StringComparison.OrdinalIgnoreCase) ||
+               (mountResult.ErrorMessage?.Contains("Invalid argument", StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private static MountResult SelectDiagnosticResult(MountResult firstAttempt, MountResult retryAttempt)
+    {
+        var firstScore = GetDiagnosticScore(firstAttempt);
+        var retryScore = GetDiagnosticScore(retryAttempt);
+        return retryScore >= firstScore ? retryAttempt : firstAttempt;
+    }
+
+    private static int GetDiagnosticScore(MountResult result)
+    {
+        var score = 0;
+        if (!string.IsNullOrWhiteSpace(result.ErrorCode)) score += 4;
+        if (!string.IsNullOrWhiteSpace(result.ErrorHint)) score += 3;
+        if (!string.IsNullOrWhiteSpace(result.DmesgSummary)) score += 2;
+        if (!string.IsNullOrWhiteSpace(result.ErrorMessage)) score += 1;
+        return score;
+    }
+
+    private static string BuildRetryFailureDetails(string originalFsType, MountResult firstAttempt, MountResult retryAttempt)
+    {
+        var firstMessage = firstAttempt.ErrorMessage ?? "Unknown error";
+        var retryMessage = retryAttempt.ErrorMessage ?? "Unknown error";
+        return $"Initial mount with fsType '{originalFsType}' failed: {firstMessage}. Retry with fsType 'auto' also failed: {retryMessage}.";
+    }
+
+    private static string BuildUserFacingMountErrorMessage(MountResult result)
+    {
+        var details = result.ErrorMessage ?? "Unknown error during mount";
+
+        if (!string.IsNullOrWhiteSpace(result.ErrorHint))
+        {
+            return $"{result.ErrorHint} Details: {details}";
+        }
+
+        return details;
     }
 }

@@ -1,14 +1,14 @@
 using FluentAssertions;
-using LiMount.App.Services;
+using LiMount.WinUI.Services;
 using LiMount.Core.Abstractions;
+using Moq;
 
 namespace LiMount.Tests.Services;
 
 /// <summary>
 /// Unit tests for DialogService.
-/// Note: These tests verify the service contract and behavior, but actual MessageBox display
-/// cannot be tested in automated tests. In a real-world scenario, you would mock the
-/// MessageBox calls or use UI automation testing.
+/// Note: These tests verify the service contract and behavior, but actual ContentDialog display
+/// cannot be tested in automated tests. In a real-world scenario, you would use UI automation testing.
 /// </summary>
 public class DialogServiceTests
 {
@@ -16,7 +16,8 @@ public class DialogServiceTests
 
     public DialogServiceTests()
     {
-        _service = new DialogService();
+        var mockXamlRootProvider = new Mock<IXamlRootProvider>();
+        _service = new DialogService(mockXamlRootProvider.Object);
     }
 
     [Fact]

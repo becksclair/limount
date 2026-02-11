@@ -15,6 +15,11 @@
     Required: GUID-based temp file path where output will be written.
     This prevents predictable temp file attacks (CWE-377).
 
+.PARAMETER SkipAdminCheck
+    Optional: bypasses the local admin-role preflight check.
+    Intended for automated hardware-in-loop test environments where
+    `wsl --unmount` is permitted without an elevated PowerShell host.
+
 .EXAMPLE
     .\Unmount-LinuxDisk.ps1 -DiskIndex 2 -OutputFile "C:\Users\...\Temp\limount_unmount_abc123.txt"
 
@@ -29,7 +34,10 @@ param(
     [int]$DiskIndex,
 
     [Parameter(Mandatory=$true)]
-    [string]$OutputFile
+    [string]$OutputFile,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$SkipAdminCheck
 )
 
 # Function to output result and exit
@@ -70,10 +78,29 @@ function Write-Result {
     exit $exitCode
 }
 
-# Require Administrator
-$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Result -Success $false -DiskIndex $DiskIndex -ErrorMessage "This script requires Administrator privileges."
+function Normalize-CommandText {
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$Text
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return ""
+    }
+
+    $withoutNull = $Text -replace "`0", ""
+    $withoutControls = [regex]::Replace($withoutNull, "[\x01-\x1F]+", " ")
+    return ([regex]::Replace($withoutControls, "\s+", " ")).Trim()
+}
+
+# Require Administrator (unless explicitly bypassed for HIL test automation)
+if (-not $SkipAdminCheck.IsPresent) {
+    $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        Write-Result -Success $false -DiskIndex $DiskIndex -ErrorMessage "This script requires Administrator privileges."
+    }
 }
 
 # Build physical disk path
@@ -88,9 +115,13 @@ try {
 
     if ($unmountExitCode -ne 0) {
         # Check for common error messages
-        $errorText = $unmountOutput -join " "
+        $errorText = Normalize-CommandText -Text ($unmountOutput -join " ")
 
-        if ($errorText -match "not currently attached" -or $errorText -match "not mounted") {
+        if ($errorText -match "not currently attached" -or
+            $errorText -match "not mounted" -or
+            $errorText -match "ERROR_FILE_NOT_FOUND" -or
+            $errorText -match "Wsl/Service/DetachDisk" -or
+            $errorText -match "The system cannot find the file specified") {
             Write-Verbose "Disk was not mounted, considering this a success..."
             Write-Result -Success $true -DiskIndex $DiskIndex
         } elseif ($errorText -match "not recognized" -or $errorText -match "invalid option") {

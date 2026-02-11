@@ -1,34 +1,28 @@
 # WinUI 3 Specifics
 
-This doc covers key differences between WinUI 3 (`LiMount.WinUI`) and WPF (`LiMount.App`).
+This doc covers key technical details for the WinUI 3 implementation (`LiMount.WinUI`).
 
 ## Platform Requirements
 
-- Windows 11 only
-- .NET 10 (preview)
+- Windows 11 (Build 22000+)
+- .NET 10
 - Windows App SDK
-
-## Key Differences from WPF
-
-| Concept | WPF | WinUI 3 |
-|---------|-----|---------|
-| Thread dispatch | `Dispatcher.Invoke` | `IUiDispatcher` abstraction (DI) |
-| Dialog root | Implicit | Requires `XamlRoot` via `IXamlRootProvider` |
-| Bool→Visibility | Built-in converter | Custom `BooleanToVisibilityConverter` |
-| String formatting | `StringFormat` in binding | `IValueConverter` |
 
 ## WinUI-Specific Services
 
-These services exist only in `LiMount.WinUI`:
+These services exist in `LiMount.WinUI/Services/`:
 
-- **`IUiDispatcher`** - Thread marshaling abstraction (like WPF's Dispatcher)
+- **`IUiDispatcher`** - Thread marshaling abstraction for UI thread operations
 - **`IXamlRootProvider`** - Provides `XamlRoot` for `ContentDialog` (set after window loads)
-- **`DialogService`** - Uses `ContentDialog` instead of WPF's `MessageBox`
+- **`DialogService`** - Uses `ContentDialog` for user prompts
 
 ## Converters
 
 Located in `LiMount.WinUI/Converters/`:
-- `BooleanToVisibilityConverter` - Must be marked `partial` for WinRT interop
+- `BooleanToVisibilityConverter` - Maps bool to Visibility (WinUI doesn't have built-in)
+- `InverseBooleanConverter` - Inverts boolean values
+- `CharToFormattedStringConverter` - Formats drive letters as "X:"
+- `SuccessToBrushConverter` - Maps success status to themed colors
 
 ## Binding Patterns
 
@@ -36,3 +30,9 @@ Prefer `x:Bind` over `{Binding}` for:
 - Compile-time validation
 - Better AOT compatibility
 - Improved performance
+
+## Architecture Notes
+
+- **Page-based composition**: `MainWindow` hosts `MainPage`, `HistoryWindow` hosts `HistoryPage`
+- **Generic Host**: Uses `Microsoft.Extensions.Hosting.Host.CreateDefaultBuilder()` for DI
+- **Async dialogs**: All dialogs are async via `ContentDialog.ShowAsync()`

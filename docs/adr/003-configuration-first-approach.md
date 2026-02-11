@@ -281,8 +281,8 @@ public class MountOrchestrator : IMountOrchestrator
 
 Implemented in:
 - `LiMount.Core/Configuration/LiMountConfiguration.cs`
-- `LiMount.App/appsettings.json`
-- `LiMount.App/App.xaml.cs` (IOptions registration)
+- `LiMount.WinUI/appsettings.json`
+- `LiMount.WinUI/App.xaml.cs` (IOptions registration)
 
 ## Validation
 

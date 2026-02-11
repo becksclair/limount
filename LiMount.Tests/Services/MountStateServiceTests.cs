@@ -121,7 +121,7 @@ public class MountStateServiceTests : IDisposable
         await _service.RegisterMountAsync(mount);
 
         // Act
-        await _service.UnregisterMountAsync(5);
+        await _service.UnregisterMountAsync(5, 1);
 
         // Assert
         var mounts = await _service.GetActiveMountsAsync();
@@ -160,6 +160,62 @@ public class MountStateServiceTests : IDisposable
 
         // Assert
         result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetMountForDiskPartitionAsync_WhenExists_ReturnsExactPartition()
+    {
+        await _service.RegisterMountAsync(new ActiveMount
+        {
+            Id = Guid.NewGuid().ToString(),
+            DiskIndex = 7,
+            PartitionNumber = 1,
+            DriveLetter = 'W'
+        });
+        await _service.RegisterMountAsync(new ActiveMount
+        {
+            Id = Guid.NewGuid().ToString(),
+            DiskIndex = 7,
+            PartitionNumber = 2,
+            DriveLetter = 'V'
+        });
+
+        var result = await _service.GetMountForDiskPartitionAsync(7, 2);
+
+        result.Should().NotBeNull();
+        result!.PartitionNumber.Should().Be(2);
+        result.DriveLetter.Should().Be('V');
+    }
+
+    [Fact]
+    public async Task GetMountsForDiskAsync_WhenMultiplePartitions_ReturnsAllForDisk()
+    {
+        await _service.RegisterMountAsync(new ActiveMount
+        {
+            Id = Guid.NewGuid().ToString(),
+            DiskIndex = 2,
+            PartitionNumber = 1,
+            DriveLetter = 'Z'
+        });
+        await _service.RegisterMountAsync(new ActiveMount
+        {
+            Id = Guid.NewGuid().ToString(),
+            DiskIndex = 2,
+            PartitionNumber = 2,
+            DriveLetter = 'Y'
+        });
+        await _service.RegisterMountAsync(new ActiveMount
+        {
+            Id = Guid.NewGuid().ToString(),
+            DiskIndex = 3,
+            PartitionNumber = 1,
+            DriveLetter = 'X'
+        });
+
+        var disk2Mounts = await _service.GetMountsForDiskAsync(2);
+
+        disk2Mounts.Should().HaveCount(2);
+        disk2Mounts.Should().OnlyContain(m => m.DiskIndex == 2);
     }
 
     [Fact]
@@ -231,6 +287,134 @@ public class MountStateServiceTests : IDisposable
         var mounts = await _service.GetActiveMountsAsync();
         mounts.Should().HaveCount(3);
         mounts.Select(m => m.DriveLetter).Should().Contain(new[] { 'Z', 'Y', 'X' });
+    }
+
+    [Fact]
+    public async Task RegisterMountAsync_MultiplePartitionsSameDisk_BothPersisted()
+    {
+        // Arrange - Two different partitions on the same disk
+        var partition1 = new ActiveMount
+        {
+            Id = Guid.NewGuid().ToString(),
+            DiskIndex = 2,
+            PartitionNumber = 1,
+            DriveLetter = 'Z',
+            MountPathLinux = "/mnt/wsl/PHYSICALDRIVE2p1"
+        };
+        var partition2 = new ActiveMount
+        {
+            Id = Guid.NewGuid().ToString(),
+            DiskIndex = 2,
+            PartitionNumber = 2,
+            DriveLetter = 'Y',
+            MountPathLinux = "/mnt/wsl/PHYSICALDRIVE2p2"
+        };
+
+        // Act - Register both partitions
+        await _service.RegisterMountAsync(partition1);
+        await _service.RegisterMountAsync(partition2);
+
+        // Assert - Both should exist
+        var mounts = await _service.GetActiveMountsAsync();
+        mounts.Should().HaveCount(2);
+        mounts.Should().Contain(m => m.DiskIndex == 2 && m.PartitionNumber == 1 && m.DriveLetter == 'Z');
+        mounts.Should().Contain(m => m.DiskIndex == 2 && m.PartitionNumber == 2 && m.DriveLetter == 'Y');
+    }
+
+    [Fact]
+    public async Task RegisterMountAsync_SamePartitionTwice_ReplacesExisting()
+    {
+        // Arrange - Same partition registered twice with different drive letters
+        var firstRegistration = new ActiveMount
+        {
+            Id = Guid.NewGuid().ToString(),
+            DiskIndex = 2,
+            PartitionNumber = 1,
+            DriveLetter = 'Z',
+            MountPathLinux = "/mnt/wsl/PHYSICALDRIVE2p1"
+        };
+        var secondRegistration = new ActiveMount
+        {
+            Id = Guid.NewGuid().ToString(),
+            DiskIndex = 2,
+            PartitionNumber = 1,
+            DriveLetter = 'Y', // Different drive letter
+            MountPathLinux = "/mnt/wsl/PHYSICALDRIVE2p1"
+        };
+
+        // Act - Register same partition twice
+        await _service.RegisterMountAsync(firstRegistration);
+        await _service.RegisterMountAsync(secondRegistration);
+
+        // Assert - Only one mount should exist, with the second drive letter
+        var mounts = await _service.GetActiveMountsAsync();
+        mounts.Should().ContainSingle();
+        mounts[0].DiskIndex.Should().Be(2);
+        mounts[0].PartitionNumber.Should().Be(1);
+        mounts[0].DriveLetter.Should().Be('Y'); // Should be the second registration
+    }
+
+    [Fact]
+    public async Task UnregisterMountAsync_PartitionScoped_LeavesSiblingPartitionIntact()
+    {
+        var partition1 = new ActiveMount
+        {
+            Id = Guid.NewGuid().ToString(),
+            DiskIndex = 2,
+            PartitionNumber = 1,
+            DriveLetter = 'Z'
+        };
+        var partition2 = new ActiveMount
+        {
+            Id = Guid.NewGuid().ToString(),
+            DiskIndex = 2,
+            PartitionNumber = 2,
+            DriveLetter = 'Y'
+        };
+
+        await _service.RegisterMountAsync(partition1);
+        await _service.RegisterMountAsync(partition2);
+
+        await _service.UnregisterMountAsync(2, 1);
+
+        var mounts = await _service.GetActiveMountsAsync();
+        mounts.Should().ContainSingle();
+        mounts[0].DiskIndex.Should().Be(2);
+        mounts[0].PartitionNumber.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task UnregisterDiskAsync_RemovesAllPartitionsForDisk()
+    {
+        // Arrange - Two partitions on the same disk
+        var partition1 = new ActiveMount
+        {
+            Id = Guid.NewGuid().ToString(),
+            DiskIndex = 2,
+            PartitionNumber = 1,
+            DriveLetter = 'Z'
+        };
+        var partition2 = new ActiveMount
+        {
+            Id = Guid.NewGuid().ToString(),
+            DiskIndex = 2,
+            PartitionNumber = 2,
+            DriveLetter = 'Y'
+        };
+
+        await _service.RegisterMountAsync(partition1);
+        await _service.RegisterMountAsync(partition2);
+
+        // Verify both are registered
+        var beforeUnregister = await _service.GetActiveMountsAsync();
+        beforeUnregister.Should().HaveCount(2);
+
+        // Act - Unregister the entire disk
+        await _service.UnregisterDiskAsync(2);
+
+        // Assert - Both partitions should be removed (WSL unmounts entire disk)
+        var afterUnregister = await _service.GetActiveMountsAsync();
+        afterUnregister.Should().BeEmpty();
     }
 
     [Fact]
@@ -334,10 +518,10 @@ public class MountStateServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UnregisterMountAsync_NonExistentDisk_DoesNotThrow()
+    public async Task UnregisterDiskAsync_NonExistentDisk_DoesNotThrow()
     {
         // Act
-        Func<Task> act = async () => await _service.UnregisterMountAsync(999);
+        Func<Task> act = async () => await _service.UnregisterDiskAsync(999);
 
         // Assert
         await act.Should().NotThrowAsync();

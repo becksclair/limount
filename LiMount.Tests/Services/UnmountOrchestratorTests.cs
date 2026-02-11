@@ -120,6 +120,39 @@ public class UnmountOrchestratorTests
     }
 
     [Fact]
+    public async Task UnmountAndUnmapAsync_UnmountFileNotFound_TreatedAsSuccess()
+    {
+        // Arrange
+        var unmappingResult = new UnmappingResult
+        {
+            Success = true,
+            DriveLetter = "Z"
+        };
+        _mockDriveMappingService
+            .Setup(e => e.ExecuteUnmappingScriptAsync(It.IsAny<char>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(unmappingResult);
+
+        var unmountResult = new UnmountResult
+        {
+            Success = false,
+            ErrorMessage = "wsl --unmount failed (exit code -1): The system cannot find the file specified. Error code: Wsl/Service/DetachDisk/ERROR_FILE_NOT_FOUND"
+        };
+        _mockMountScriptService
+            .Setup(e => e.ExecuteUnmountScriptAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(unmountResult);
+
+        // Act
+        var result = await _orchestrator.UnmountAndUnmapAsync(1, 'Z');
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Success.Should().BeTrue();
+        result.FailedStep.Should().BeNull();
+        result.ErrorMessage.Should().BeNull();
+        result.DriveLetter.Should().Be('Z');
+    }
+
+    [Fact]
     public async Task UnmountAndUnmapAsync_Success_ReturnsSuccessWithDetails()
     {
         // Arrange
@@ -171,7 +204,9 @@ public class UnmountOrchestratorTests
 
         // Assert
         _mockHistoryService.Verify(
-            h => h.AddEntryAsync(It.Is<MountHistoryEntry>(e => e.Success && e.OperationType == MountHistoryOperationType.Unmount)),
+            h => h.AddEntryAsync(
+                It.Is<MountHistoryEntry>(e => e.Success && e.OperationType == MountHistoryOperationType.Unmount),
+                It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -194,7 +229,9 @@ public class UnmountOrchestratorTests
 
         // Assert
         _mockHistoryService.Verify(
-            h => h.AddEntryAsync(It.Is<MountHistoryEntry>(e => !e.Success && e.OperationType == MountHistoryOperationType.Unmount)),
+            h => h.AddEntryAsync(
+                It.Is<MountHistoryEntry>(e => !e.Success && e.OperationType == MountHistoryOperationType.Unmount),
+                It.IsAny<CancellationToken>()),
             Times.Once);
     }
 }

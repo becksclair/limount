@@ -50,19 +50,19 @@ public abstract partial class BaseMainViewModel : ObservableObject
     #region Observable Properties
 
     [ObservableProperty]
-    private ObservableCollection<DiskInfo> _disks = new();
+    private ObservableCollection<DiskInfo> _disks = [];
 
     [ObservableProperty]
     private DiskInfo? _selectedDisk;
 
     [ObservableProperty]
-    private ObservableCollection<PartitionInfo> _partitions = new();
+    private ObservableCollection<PartitionInfo> _partitions = [];
 
     [ObservableProperty]
     private PartitionInfo? _selectedPartition;
 
     [ObservableProperty]
-    private ObservableCollection<char> _freeDriveLetters = new();
+    private ObservableCollection<char> _freeDriveLetters = [];
 
     [ObservableProperty]
     private char? _selectedDriveLetter;
@@ -91,6 +91,7 @@ public abstract partial class BaseMainViewModel : ObservableObject
     /// The disk index of the currently mounted disk, or null if nothing is mounted.
     /// </summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsMounted))]
     private int? _currentMountedDiskIndex;
 
     /// <summary>
@@ -112,31 +113,58 @@ public abstract partial class BaseMainViewModel : ObservableObject
 
     #endregion
 
+    protected sealed record Dependencies(
+        IDiskEnumerationService DiskService,
+        IDriveLetterService DriveLetterService,
+        IMountOrchestrator MountOrchestrator,
+        IUnmountOrchestrator UnmountOrchestrator,
+        IMountStateService MountStateService,
+        IEnvironmentValidationService EnvironmentValidationService,
+        IFilesystemDetectionService FilesystemDetectionService,
+        IDialogService DialogService,
+        ILogger Logger,
+        LiMountConfiguration Config);
+
     /// <summary>
     /// Initializes a new instance of <see cref="BaseMainViewModel"/> with required services.
     /// </summary>
-    protected BaseMainViewModel(
-        IDiskEnumerationService diskService,
-        IDriveLetterService driveLetterService,
-        IMountOrchestrator mountOrchestrator,
-        IUnmountOrchestrator unmountOrchestrator,
-        IMountStateService mountStateService,
-        IEnvironmentValidationService environmentValidationService,
-        IFilesystemDetectionService filesystemDetectionService,
-        IDialogService dialogService,
-        ILogger logger,
-        LiMountConfiguration config)
+    protected BaseMainViewModel(Dependencies deps)
     {
-        DiskService = diskService ?? throw new ArgumentNullException(nameof(diskService));
-        DriveLetterService = driveLetterService ?? throw new ArgumentNullException(nameof(driveLetterService));
-        MountOrchestrator = mountOrchestrator ?? throw new ArgumentNullException(nameof(mountOrchestrator));
-        UnmountOrchestrator = unmountOrchestrator ?? throw new ArgumentNullException(nameof(unmountOrchestrator));
-        MountStateService = mountStateService ?? throw new ArgumentNullException(nameof(mountStateService));
-        EnvironmentValidationService = environmentValidationService ?? throw new ArgumentNullException(nameof(environmentValidationService));
-        FilesystemDetectionService = filesystemDetectionService ?? throw new ArgumentNullException(nameof(filesystemDetectionService));
-        DialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
-        Logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        Config = config ?? throw new ArgumentNullException(nameof(config));
+        ArgumentNullException.ThrowIfNull(deps);
+
+        var (
+            diskService,
+            driveLetterService,
+            mountOrchestrator,
+            unmountOrchestrator,
+            mountStateService,
+            environmentValidationService,
+            filesystemDetectionService,
+            dialogService,
+            logger,
+            config) = deps;
+
+        ArgumentNullException.ThrowIfNull(diskService);
+        ArgumentNullException.ThrowIfNull(driveLetterService);
+        ArgumentNullException.ThrowIfNull(mountOrchestrator);
+        ArgumentNullException.ThrowIfNull(unmountOrchestrator);
+        ArgumentNullException.ThrowIfNull(mountStateService);
+        ArgumentNullException.ThrowIfNull(environmentValidationService);
+        ArgumentNullException.ThrowIfNull(filesystemDetectionService);
+        ArgumentNullException.ThrowIfNull(dialogService);
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(config);
+
+        DiskService = diskService;
+        DriveLetterService = driveLetterService;
+        MountOrchestrator = mountOrchestrator;
+        UnmountOrchestrator = unmountOrchestrator;
+        MountStateService = mountStateService;
+        EnvironmentValidationService = environmentValidationService;
+        FilesystemDetectionService = filesystemDetectionService;
+        DialogService = dialogService;
+        Logger = logger;
+        Config = config;
 
         PropertyChanged += OnPropertyChangedHandler;
     }
@@ -164,11 +192,6 @@ public abstract partial class BaseMainViewModel : ObservableObject
     #endregion
 
     #region Property Change Handling
-
-    partial void OnCurrentMountedDiskIndexChanged(int? value)
-    {
-        OnPropertyChanged(nameof(IsMounted));
-    }
 
     private void OnPropertyChangedHandler(object? sender, PropertyChangedEventArgs e)
     {
@@ -224,7 +247,7 @@ public abstract partial class BaseMainViewModel : ObservableObject
         return "Click Detect to identify";
     }
 
-    private bool CanDetectFilesystem() => SelectedDisk != null && SelectedPartition != null && !IsBusy && !IsDetectingFs;
+    private bool CanDetectFilesystem() => SelectedDisk != null && SelectedPartition != null && !IsBusy && !IsDetectingFs && FilesystemDetectionService != null;
 
     private bool CanMount()
     {
@@ -312,25 +335,38 @@ public abstract partial class BaseMainViewModel : ObservableObject
             SelectedDriveLetter = FreeDriveLetters[0];
         }
 
+        if (Disks.Count == 0)
+        {
+            StatusMessage = "No Linux candidate disks found. Connect a Linux disk and click Refresh.";
+            return;
+        }
+
+        if (FreeDriveLetters.Count == 0)
+        {
+            StatusMessage = "No free drive letters are available. Unmap a drive and click Refresh.";
+            return;
+        }
+
         StatusMessage = $"Found {Disks.Count} candidate disk(s) and {FreeDriveLetters.Count} free drive letter(s).";
     }
 
     /// <summary>
     /// Reads process stdout with proper timeout handling.
     /// </summary>
-    protected async Task<string> ReadProcessOutputWithTimeoutAsync(Process process, int timeoutMs, string processName)
+    protected async Task<string> ReadProcessOutputWithTimeoutAsync(Process process, int timeoutMs, string processName, CancellationToken cancellationToken = default)
     {
-        using var cts = new CancellationTokenSource(timeoutMs);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(timeoutMs);
         string output;
 
         try
         {
             output = await process.StandardOutput.ReadToEndAsync(cts.Token);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
             try { process.Kill(); } catch { /* ignore kill errors */ }
-            Logger.LogWarning("{ProcessName} process timed out reading output after {TimeoutMs}ms and was killed", processName, timeoutMs);
+            Logger.LogWarning(ex, "{ProcessName} process timed out reading output after {TimeoutMs}ms and was killed", processName, timeoutMs);
             return string.Empty;
         }
 
@@ -338,10 +374,10 @@ public abstract partial class BaseMainViewModel : ObservableObject
         {
             await process.WaitForExitAsync(cts.Token);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
             try { process.Kill(); } catch { /* ignore kill errors */ }
-            Logger.LogDebug("{ProcessName} process exit wait timed out after output was read; returning captured output", processName);
+            Logger.LogDebug(ex, "{ProcessName} process exit wait timed out after output was read; returning captured output", processName);
         }
 
         return output;
@@ -444,7 +480,7 @@ public abstract partial class BaseMainViewModel : ObservableObject
             var activeMount = new ActiveMount
             {
                 Id = Guid.NewGuid().ToString(),
-                MountedAt = DateTime.Now,
+                MountedAt = DateTime.UtcNow,
                 DiskIndex = result.DiskIndex,
                 PartitionNumber = result.Partition,
                 DriveLetter = driveLetter,
@@ -452,7 +488,7 @@ public abstract partial class BaseMainViewModel : ObservableObject
                 MountPathLinux = result.MountPathLinux ?? string.Empty,
                 MountPathUNC = result.MountPathUNC ?? string.Empty,
                 IsVerified = true,
-                LastVerified = DateTime.Now
+                LastVerified = DateTime.UtcNow
             };
 
             try
@@ -542,10 +578,18 @@ public abstract partial class BaseMainViewModel : ObservableObject
             }
 
             var diskIndex = CurrentMountedDiskIndex.Value;
+            var partition = CurrentMountedPartition;
 
             try
             {
-                await MountStateService.UnregisterMountAsync(diskIndex);
+                if (partition.HasValue)
+                {
+                    await MountStateService.UnregisterMountAsync(diskIndex, partition.Value);
+                }
+                else
+                {
+                    await MountStateService.UnregisterDiskAsync(diskIndex);
+                }
             }
             catch (Exception ex)
             {
@@ -682,93 +726,152 @@ public abstract partial class BaseMainViewModel : ObservableObject
         {
             StatusMessage = "Checking for existing mounts...";
 
-            var activeMounts = await MountStateService.GetActiveMountsAsync(cancellationToken);
-            if (activeMounts.Count > 0)
+            if (await TryRestoreMountFromStateAsync(cancellationToken))
             {
-                var mount = activeMounts.First();
+                return;
+            }
 
-                var uncPathExists = false;
-                if (!string.IsNullOrEmpty(mount.MountPathUNC))
+            if (Config.Initialization.AutoDetectSystemMounts)
+            {
+                var detectedMount = await DetectMountFromSystemAsync(cancellationToken);
+                if (detectedMount is not null)
                 {
-                    var timeoutMs = Config.MountOperations.UncPathCheckTimeoutMs;
-                    try
-                    {
-                        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                        cts.CancelAfter(timeoutMs);
-                        var checkTask = Task.Run(() => Directory.Exists(mount.MountPathUNC), cts.Token);
-                        uncPathExists = await checkTask.WaitAsync(cts.Token);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        Logger.LogWarning("UNC path check timed out after {TimeoutMs}ms for {UNC}. " +
-                            "The underlying I/O may still be blocked on a dead network path.", timeoutMs, mount.MountPathUNC);
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogWarning(ex, "Failed to verify UNC path {UNC}", mount.MountPathUNC);
-                    }
-                }
-
-                if (uncPathExists)
-                {
-                    CurrentMountedDiskIndex = mount.DiskIndex;
-                    CurrentMountedPartition = mount.PartitionNumber;
-                    CurrentMountedDriveLetter = mount.DriveLetter;
-                    CanOpenExplorer = true;
-
-                    StatusMessage = $"Found existing mount: Disk {mount.DiskIndex} partition {mount.PartitionNumber} → {mount.DriveLetter}:";
-                    Logger.LogInformation("Detected existing mount from state: Disk {DiskIndex} partition {Partition} at {DriveLetter}:",
-                        mount.DiskIndex, mount.PartitionNumber, mount.DriveLetter);
-
-                    UnmountCommand.NotifyCanExecuteChanged();
-                    OpenExplorerCommand.NotifyCanExecuteChanged();
-                    MountCommand.NotifyCanExecuteChanged();
+                    ApplyDetectedMountFromSystem(detectedMount.Value);
                     return;
                 }
-                else
-                {
-                    Logger.LogInformation("Stale mount state found for disk {DiskIndex}, cleaning up", mount.DiskIndex);
-                    await MountStateService.UnregisterMountAsync(mount.DiskIndex, cancellationToken);
-                }
             }
 
-            var detectedMount = await DetectMountFromSystemAsync(cancellationToken);
-            if (detectedMount != null)
-            {
-                CurrentMountedDiskIndex = detectedMount.Value.diskIndex;
-                CurrentMountedPartition = detectedMount.Value.partition;
-
-                if (detectedMount.Value.driveLetter != '\0')
-                {
-                    CurrentMountedDriveLetter = detectedMount.Value.driveLetter;
-                    CanOpenExplorer = true;
-                    StatusMessage = $"Detected existing mount: Disk {detectedMount.Value.diskIndex} → {detectedMount.Value.driveLetter}:";
-                }
-                else
-                {
-                    CurrentMountedDriveLetter = null;
-                    CanOpenExplorer = false;
-                    StatusMessage = $"Detected WSL mount for Disk {detectedMount.Value.diskIndex} (no drive letter). Click Unmount to clean up.";
-                }
-
-                Logger.LogInformation("Detected existing mount from system: Disk {DiskIndex} partition {Partition}, drive letter: {DriveLetter}",
-                    detectedMount.Value.diskIndex, detectedMount.Value.partition,
-                    detectedMount.Value.driveLetter == '\0' ? "(none)" : detectedMount.Value.driveLetter.ToString());
-
-                UnmountCommand.NotifyCanExecuteChanged();
-                OpenExplorerCommand.NotifyCanExecuteChanged();
-                MountCommand.NotifyCanExecuteChanged();
-            }
-            else
-            {
-                StatusMessage = $"Found {Disks.Count} candidate disk(s). Ready to mount.";
-            }
+            SetReadyToMountStatus();
         }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Failed to detect existing mounts");
-            StatusMessage = $"Found {Disks.Count} candidate disk(s). Ready to mount.";
+            SetReadyToMountStatus();
         }
+    }
+
+    private void SetReadyToMountStatus()
+    {
+        StatusMessage = $"Found {Disks.Count} candidate disk(s). Ready to mount.";
+    }
+
+    private void NotifyMountStateCommandsChanged()
+    {
+        UnmountCommand.NotifyCanExecuteChanged();
+        OpenExplorerCommand.NotifyCanExecuteChanged();
+        MountCommand.NotifyCanExecuteChanged();
+    }
+
+    private async Task<bool> TryRestoreMountFromStateAsync(CancellationToken cancellationToken)
+    {
+        var activeMounts = await MountStateService.GetActiveMountsAsync(cancellationToken);
+        if (activeMounts.Count == 0)
+        {
+            return false;
+        }
+
+        ActiveMount? mountToRestore = null;
+        var staleMounts = new List<ActiveMount>();
+
+        foreach (var mount in activeMounts)
+        {
+            var uncPathExists = await VerifyUncPathExistsAsync(mount, cancellationToken);
+            if (uncPathExists)
+            {
+                mountToRestore ??= mount;
+            }
+            else
+            {
+                staleMounts.Add(mount);
+            }
+        }
+
+        foreach (var staleMount in staleMounts)
+        {
+            Logger.LogInformation(
+                "Stale mount state found for disk {DiskIndex} partition {Partition}, cleaning up entry",
+                staleMount.DiskIndex,
+                staleMount.PartitionNumber);
+
+            await MountStateService.UnregisterMountAsync(
+                staleMount.DiskIndex,
+                staleMount.PartitionNumber,
+                cancellationToken);
+        }
+
+        if (mountToRestore != null)
+        {
+            ApplyExistingMountFromState(mountToRestore);
+            return true;
+        }
+
+        return false;
+    }
+
+    private async Task<bool> VerifyUncPathExistsAsync(ActiveMount mount, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(mount.MountPathUNC))
+        {
+            return false;
+        }
+
+        var timeoutMs = Config.MountOperations.UncPathCheckTimeoutMs;
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(timeoutMs);
+            var checkTask = Task.Run(() => Directory.Exists(mount.MountPathUNC), cts.Token);
+            return await checkTask.WaitAsync(cts.Token);
+        }
+        catch (OperationCanceledException ex)
+        {
+            Logger.LogWarning(ex, "UNC path check timed out after {TimeoutMs}ms for {UNC}. The underlying I/O may still be blocked on a dead network path.", timeoutMs, mount.MountPathUNC);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to verify UNC path {UNC}", mount.MountPathUNC);
+            return false;
+        }
+    }
+
+    private void ApplyExistingMountFromState(ActiveMount mount)
+    {
+        CurrentMountedDiskIndex = mount.DiskIndex;
+        CurrentMountedPartition = mount.PartitionNumber;
+        CurrentMountedDriveLetter = mount.DriveLetter;
+        CanOpenExplorer = true;
+
+        StatusMessage = $"Found existing mount: Disk {mount.DiskIndex} partition {mount.PartitionNumber} → {mount.DriveLetter}:";
+        Logger.LogInformation("Detected existing mount from state: Disk {DiskIndex} partition {Partition} at {DriveLetter}:",
+            mount.DiskIndex, mount.PartitionNumber, mount.DriveLetter);
+
+        NotifyMountStateCommandsChanged();
+    }
+
+    private void ApplyDetectedMountFromSystem((int diskIndex, int partition, char driveLetter) detectedMount)
+    {
+        CurrentMountedDiskIndex = detectedMount.diskIndex;
+        CurrentMountedPartition = detectedMount.partition;
+
+        if (detectedMount.driveLetter != '\0')
+        {
+            CurrentMountedDriveLetter = detectedMount.driveLetter;
+            CanOpenExplorer = true;
+            StatusMessage = $"Detected existing mount: Disk {detectedMount.diskIndex} → {detectedMount.driveLetter}:";
+        }
+        else
+        {
+            CurrentMountedDriveLetter = null;
+            CanOpenExplorer = false;
+            StatusMessage = $"Detected WSL mount for Disk {detectedMount.diskIndex} (no drive letter). Click Unmount to clean up.";
+        }
+
+        Logger.LogInformation("Detected existing mount from system: Disk {DiskIndex} partition {Partition}, drive letter: {DriveLetter}",
+            detectedMount.diskIndex, detectedMount.partition,
+            detectedMount.driveLetter == '\0' ? "(none)" : detectedMount.driveLetter.ToString());
+
+        NotifyMountStateCommandsChanged();
     }
 
     /// <summary>
@@ -777,7 +880,130 @@ public abstract partial class BaseMainViewModel : ObservableObject
     /// </summary>
     protected async Task<(int diskIndex, int partition, char driveLetter)?> DetectMountFromSystemAsync(CancellationToken cancellationToken = default)
     {
-        // Check subst mappings
+        var substMount = await TryDetectMountFromSubstAsync(cancellationToken);
+        if (substMount is not null)
+        {
+            return substMount;
+        }
+
+        return await TryDetectMountFromWslAsync(cancellationToken);
+    }
+
+    private static bool TryParseDiskIndex(string value, out int diskIndex)
+    {
+        return int.TryParse(value, out diskIndex) && diskIndex >= 0 && diskIndex <= MaxDiskIndex;
+    }
+
+    private static bool TryParsePartition(string value, out int partition)
+    {
+        return int.TryParse(value, out partition) && partition >= 0 && partition <= MaxPartition;
+    }
+
+    internal static (int diskIndex, int partition)? ParseMountedPhysicalDriveFromMountOutput(string wslOutput)
+    {
+        foreach (var entry in wslOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var match = Regex.Match(
+                entry,
+                @"/mnt/wsl/PHYSICALDRIVE(\d+)p(\d+)\b",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromMilliseconds(RegexTimeoutMs));
+
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            if (!TryParseDiskIndex(match.Groups[1].Value, out var diskIndex))
+            {
+                continue;
+            }
+
+            if (!TryParsePartition(match.Groups[2].Value, out var partition))
+            {
+                continue;
+            }
+
+            return (diskIndex, partition);
+        }
+
+        return null;
+    }
+
+    internal static IReadOnlyList<string> FindStalePhysicalDriveDirectories(string directoryListingOutput, string mountOutput)
+    {
+        var listedEntries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in directoryListingOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (TryParsePhysicalDriveEntryName(entry, out var normalizedName))
+            {
+                listedEntries.Add(normalizedName);
+            }
+        }
+
+        var mountedEntries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in mountOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var match = Regex.Match(
+                entry,
+                @"/mnt/wsl/(PHYSICALDRIVE(\d+)p(\d+))\b",
+                RegexOptions.IgnoreCase,
+                TimeSpan.FromMilliseconds(RegexTimeoutMs));
+
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            if (!TryParseDiskIndex(match.Groups[2].Value, out var diskIndex))
+            {
+                continue;
+            }
+
+            if (!TryParsePartition(match.Groups[3].Value, out var partition))
+            {
+                continue;
+            }
+
+            mountedEntries.Add($"PHYSICALDRIVE{diskIndex}p{partition}");
+        }
+
+        return listedEntries
+            .Where(entry => !mountedEntries.Contains(entry))
+            .OrderBy(entry => entry, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static bool TryParsePhysicalDriveEntryName(string entry, out string normalizedName)
+    {
+        normalizedName = string.Empty;
+        var match = Regex.Match(
+            entry,
+            @"^PHYSICALDRIVE(\d+)p(\d+)$",
+            RegexOptions.IgnoreCase,
+            TimeSpan.FromMilliseconds(RegexTimeoutMs));
+
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        if (!TryParseDiskIndex(match.Groups[1].Value, out var diskIndex))
+        {
+            return false;
+        }
+
+        if (!TryParsePartition(match.Groups[2].Value, out var partition))
+        {
+            return false;
+        }
+
+        normalizedName = $"PHYSICALDRIVE{diskIndex}p{partition}";
+        return true;
+    }
+
+    private async Task<(int diskIndex, int partition, char driveLetter)?> TryDetectMountFromSubstAsync(CancellationToken cancellationToken)
+    {
         try
         {
             var psi = new ProcessStartInfo
@@ -789,40 +1015,45 @@ public abstract partial class BaseMainViewModel : ObservableObject
             };
 
             using var process = Process.Start(psi);
-            if (process != null)
+            if (process == null)
             {
-                var substTimeoutMs = Config.MountOperations.SubstCommandTimeoutMs;
-                var output = await ReadProcessOutputWithTimeoutAsync(process, substTimeoutMs, "subst");
+                return null;
+            }
 
-                foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            var substTimeoutMs = Config.MountOperations.SubstCommandTimeoutMs;
+            var output = await ReadProcessOutputWithTimeoutAsync(process, substTimeoutMs, "subst", cancellationToken);
+
+            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var match = Regex.Match(
+                    line,
+                    @"^([A-Z]):\\: => .+PHYSICALDRIVE(\d+)p(\d+)",
+                    RegexOptions.IgnoreCase,
+                    TimeSpan.FromMilliseconds(RegexTimeoutMs));
+
+                if (!match.Success)
                 {
-                    var match = Regex.Match(
-                        line,
-                        @"^([A-Z]):\\: => .+PHYSICALDRIVE(\d+)p(\d+)",
-                        RegexOptions.IgnoreCase,
-                        TimeSpan.FromMilliseconds(RegexTimeoutMs));
-
-                    if (match.Success)
-                    {
-                        var driveLetter = match.Groups[1].Value[0];
-
-                        if (!int.TryParse(match.Groups[2].Value, out var diskIndex) || diskIndex < 0 || diskIndex > MaxDiskIndex)
-                        {
-                            Logger.LogWarning("Invalid disk index in subst output: {Value}", match.Groups[2].Value);
-                            continue;
-                        }
-                        if (!int.TryParse(match.Groups[3].Value, out var partition) || partition < 0 || partition > MaxPartition)
-                        {
-                            Logger.LogWarning("Invalid partition number in subst output: {Value}", match.Groups[3].Value);
-                            continue;
-                        }
-
-                        Logger.LogDebug("Found subst mapping: {DriveLetter}: -> Disk {DiskIndex} partition {Partition}",
-                            driveLetter, diskIndex, partition);
-
-                        return (diskIndex, partition, driveLetter);
-                    }
+                    continue;
                 }
+
+                var driveLetter = match.Groups[1].Value[0];
+
+                if (!TryParseDiskIndex(match.Groups[2].Value, out var diskIndex))
+                {
+                    Logger.LogWarning("Invalid disk index in subst output: {Value}", match.Groups[2].Value);
+                    continue;
+                }
+
+                if (!TryParsePartition(match.Groups[3].Value, out var partition))
+                {
+                    Logger.LogWarning("Invalid partition number in subst output: {Value}", match.Groups[3].Value);
+                    continue;
+                }
+
+                Logger.LogDebug("Found subst mapping: {DriveLetter}: -> Disk {DiskIndex} partition {Partition}",
+                    driveLetter, diskIndex, partition);
+
+                return (diskIndex, partition, driveLetter);
             }
         }
         catch (RegexMatchTimeoutException ex)
@@ -834,10 +1065,47 @@ public abstract partial class BaseMainViewModel : ObservableObject
             Logger.LogWarning(ex, "Failed to check subst mappings");
         }
 
-        // Check for WSL-only mounts (no drive letter mapping)
+        return null;
+    }
+
+    private async Task<(int diskIndex, int partition, char driveLetter)?> TryDetectMountFromWslAsync(CancellationToken cancellationToken)
+    {
         try
         {
             var wslPsi = new ProcessStartInfo
+            {
+                FileName = "wsl.exe",
+                // IMPORTANT: list actual mounted filesystems, not directory names under /mnt/wsl.
+                // Stale directories (for example PHYSICALDRIVEXpY) can persist after failed mounts and
+                // would cause false "already mounted" detections if we only run `ls /mnt/wsl`.
+                Arguments = "-e sh -lc \"mount | grep -i '/mnt/wsl/PHYSICALDRIVE' || true\"",
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var wslProcess = Process.Start(wslPsi);
+            if (wslProcess == null)
+            {
+                return null;
+            }
+
+            var wslTimeoutMs = Config.MountOperations.WslCommandTimeoutMs;
+            var wslOutput = await ReadProcessOutputWithTimeoutAsync(wslProcess, wslTimeoutMs, "wsl mount query", cancellationToken);
+
+            var parsedMount = ParseMountedPhysicalDriveFromMountOutput(wslOutput);
+            if (parsedMount.HasValue)
+            {
+                var (diskIndex, partition) = parsedMount.Value;
+                Logger.LogDebug("Found WSL mount without drive letter: Disk {DiskIndex} partition {Partition}",
+                    diskIndex, partition);
+
+                return (diskIndex, partition, '\0');
+            }
+
+            // Best-effort self-heal: prune stale empty /mnt/wsl/PHYSICALDRIVE*p* directories
+            // that are not present in the live mount table.
+            var listPsi = new ProcessStartInfo
             {
                 FileName = "wsl.exe",
                 Arguments = "-e ls /mnt/wsl",
@@ -846,39 +1114,18 @@ public abstract partial class BaseMainViewModel : ObservableObject
                 CreateNoWindow = true
             };
 
-            using var wslProcess = Process.Start(wslPsi);
-            if (wslProcess != null)
+            using var listProcess = Process.Start(listPsi);
+            if (listProcess == null)
             {
-                var wslTimeoutMs = Config.MountOperations.WslCommandTimeoutMs;
-                var wslOutput = await ReadProcessOutputWithTimeoutAsync(wslProcess, wslTimeoutMs, "wsl ls");
+                return null;
+            }
 
-                foreach (var entry in wslOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries))
-                {
-                    var match = Regex.Match(
-                        entry.Trim(),
-                        @"PHYSICALDRIVE(\d+)p(\d+)",
-                        RegexOptions.IgnoreCase,
-                        TimeSpan.FromMilliseconds(RegexTimeoutMs));
-
-                    if (match.Success)
-                    {
-                        if (!int.TryParse(match.Groups[1].Value, out var diskIndex) || diskIndex < 0 || diskIndex > MaxDiskIndex)
-                        {
-                            Logger.LogWarning("Invalid disk index in WSL output: {Value}", match.Groups[1].Value);
-                            continue;
-                        }
-                        if (!int.TryParse(match.Groups[2].Value, out var partition) || partition < 0 || partition > MaxPartition)
-                        {
-                            Logger.LogWarning("Invalid partition number in WSL output: {Value}", match.Groups[2].Value);
-                            continue;
-                        }
-
-                        Logger.LogDebug("Found WSL mount without drive letter: Disk {DiskIndex} partition {Partition}",
-                            diskIndex, partition);
-
-                        return (diskIndex, partition, '\0');
-                    }
-                }
+            var listingOutput = await ReadProcessOutputWithTimeoutAsync(listProcess, wslTimeoutMs, "wsl stale dir query", cancellationToken);
+            var staleEntries = FindStalePhysicalDriveDirectories(listingOutput, wslOutput);
+            if (staleEntries.Count > 0)
+            {
+                Logger.LogInformation("Detected {Count} stale WSL mount directory entries: {Entries}", staleEntries.Count, string.Join(", ", staleEntries));
+                await TryCleanupStalePhysicalDriveDirectoriesAsync(staleEntries, wslOutput, cancellationToken);
             }
         }
         catch (RegexMatchTimeoutException ex)
@@ -891,6 +1138,70 @@ public abstract partial class BaseMainViewModel : ObservableObject
         }
 
         return null;
+    }
+
+    private async Task TryCleanupStalePhysicalDriveDirectoriesAsync(
+        IReadOnlyList<string> staleEntries,
+        string mountOutput,
+        CancellationToken cancellationToken)
+    {
+        if (staleEntries.Count == 0)
+        {
+            return;
+        }
+
+        // Entries are validated by FindStalePhysicalDriveDirectories and reconstructed in canonical form.
+        var entriesArg = string.Join(" ", staleEntries.Select(entry => $"'{entry}'"));
+        var cleanupScript = $"for d in {entriesArg}; do p=\"/mnt/wsl/$d\"; [ -d \"$p\" ] || continue; mount | grep -F \" on $p \" >/dev/null 2>&1 && continue; rmdir \"$p\" 2>/dev/null || true; done";
+
+        var cleanupPsi = new ProcessStartInfo
+        {
+            FileName = "wsl.exe",
+            Arguments = $"-e sh -lc \"{cleanupScript}\"",
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var cleanupProcess = Process.Start(cleanupPsi);
+        if (cleanupProcess == null)
+        {
+            Logger.LogWarning("Failed to start WSL stale-directory cleanup process.");
+            return;
+        }
+
+        var timeoutMs = Config.MountOperations.WslCommandTimeoutMs;
+        await ReadProcessOutputWithTimeoutAsync(cleanupProcess, timeoutMs, "wsl stale dir cleanup", cancellationToken);
+
+        var verifyPsi = new ProcessStartInfo
+        {
+            FileName = "wsl.exe",
+            Arguments = "-e ls /mnt/wsl",
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var verifyProcess = Process.Start(verifyPsi);
+        if (verifyProcess == null)
+        {
+            return;
+        }
+
+        var verifyOutput = await ReadProcessOutputWithTimeoutAsync(verifyProcess, timeoutMs, "wsl stale dir verify", cancellationToken);
+        var remainingStale = FindStalePhysicalDriveDirectories(verifyOutput, mountOutput);
+        var stillPresent = staleEntries.Where(entry => remainingStale.Contains(entry, StringComparer.OrdinalIgnoreCase)).ToArray();
+
+        if (stillPresent.Length == 0)
+        {
+            Logger.LogInformation("Successfully removed stale WSL directory entries: {Entries}", string.Join(", ", staleEntries));
+        }
+        else
+        {
+            Logger.LogWarning(
+                "Stale WSL directory cleanup could not remove: {Entries}. This is non-fatal and may indicate non-empty folders or insufficient permissions.",
+                string.Join(", ", stillPresent));
+        }
     }
 
     #endregion

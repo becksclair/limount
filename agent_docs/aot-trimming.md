@@ -9,6 +9,10 @@ From `LiMount.WinUI.csproj`:
 - `PublishReadyToRun`: `true` (faster startup without full AOT)
 - `TrimmerRootAssembly`: Serilog (preserves logging under trimming)
 
+From WinUI publish profiles:
+- `PublishTrimmed`: `false` for release profiles (`win-x64`, `win-x86`, `win-arm64`)
+- Trimming is intentionally deferred until all runtime `{Binding}` paths are converted to trim-safe compiled bindings or explicit preservation.
+
 ## AOT Compatibility Rules
 
 ### 1. Mark WinRT-interop classes as `partial`
