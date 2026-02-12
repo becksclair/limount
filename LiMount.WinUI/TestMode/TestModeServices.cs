@@ -1,5 +1,6 @@
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
+using LiMount.WinUI.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace LiMount.WinUI.TestMode;
@@ -16,6 +17,10 @@ internal static class TestModeServices
         services.AddSingleton<IFilesystemDetectionService, TestFilesystemDetectionService>();
         services.AddSingleton<IMountOrchestrator, TestMountOrchestrator>();
         services.AddSingleton<IUnmountOrchestrator, TestUnmountOrchestrator>();
+        services.AddSingleton<IUserSettingsService, TestUserSettingsService>();
+        services.AddSingleton<IPlatformCapabilityService, TestPlatformCapabilityService>();
+        services.AddSingleton<ILinkOpenerService, TestLinkOpenerService>();
+        services.AddSingleton<IHyperVEnableService, TestHyperVEnableService>();
         return services;
     }
 }
@@ -368,5 +373,115 @@ internal static class TestModeExtensions
         where TOut : class
     {
         return value == null ? null : map(value);
+    }
+}
+
+internal sealed class TestUserSettingsService : IUserSettingsService
+{
+    private readonly object _sync = new();
+    private UserSettings _settings;
+
+    public TestUserSettingsService()
+    {
+        var forceWizard = string.Equals(
+            Environment.GetEnvironmentVariable("LIMOUNT_TEST_FORCE_WIZARD"),
+            "1",
+            StringComparison.OrdinalIgnoreCase);
+
+        _settings = new UserSettings
+        {
+            HasCompletedSetup = !forceWizard
+        };
+    }
+
+    public Task<UserSettings> LoadOrCreateAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            return Task.FromResult(Clone(_settings));
+        }
+    }
+
+    public Task SaveAsync(UserSettings settings, CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            _settings = Clone(settings);
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task ResetAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            _settings = new UserSettings();
+        }
+        return Task.CompletedTask;
+    }
+
+    private static UserSettings Clone(UserSettings settings)
+    {
+        return new UserSettings
+        {
+            Version = settings.Version,
+            HasCompletedSetup = settings.HasCompletedSetup,
+            BackendPreference = settings.BackendPreference,
+            VmFallbackPolicy = settings.VmFallbackPolicy,
+            Hypervisor = settings.Hypervisor,
+            AccessMode = settings.AccessMode,
+            VmAppliance = settings.VmAppliance == null ? new VmApplianceSettings() : new VmApplianceSettings
+            {
+                VmName = settings.VmAppliance.VmName,
+                StoragePath = settings.VmAppliance.StoragePath,
+                UseExistingVm = settings.VmAppliance.UseExistingVm
+            },
+            GuestAuth = settings.GuestAuth == null ? new GuestAuthSettings() : new GuestAuthSettings
+            {
+                Host = settings.GuestAuth.Host,
+                Username = settings.GuestAuth.Username,
+                UseSshKey = settings.GuestAuth.UseSshKey
+            }
+        };
+    }
+}
+
+internal sealed class TestPlatformCapabilityService : IPlatformCapabilityService
+{
+    public Task<PlatformCapabilities> DetectAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(new PlatformCapabilities
+        {
+            WindowsEdition = "Professional",
+            HyperVSupported = true,
+            HyperVEnabled = true,
+            HyperVCmdletsAvailable = true,
+            WslInstalled = true,
+            WslMountSupported = true,
+            DefaultDistroPresent = true,
+            VmwareInstalled = false,
+            VirtualBoxInstalled = false,
+            HostCpuCores = 8,
+            HostMemoryBytes = 16L * 1024 * 1024 * 1024,
+            VmwareUnavailableReason = "vmrun.exe was not found.",
+            VirtualBoxUnavailableReason = "VBoxManage.exe was not found."
+        });
+    }
+}
+
+internal sealed class TestLinkOpenerService : ILinkOpenerService
+{
+    public bool TryOpen(string url, out string? errorMessage)
+    {
+        errorMessage = null;
+        return true;
+    }
+}
+
+internal sealed class TestHyperVEnableService : IHyperVEnableService
+{
+    public Task<HyperVEnableResult> EnableAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(HyperVEnableResult.Completed(requiresRestart: true));
     }
 }

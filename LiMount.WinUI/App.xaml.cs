@@ -7,6 +7,7 @@ using LiMount.WinUI.TestMode;
 using LiMount.WinUI.ViewModels;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -75,6 +76,8 @@ public partial class App : Application
                     services.AddSingleton<IEnvironmentValidationService, EnvironmentValidationService>();
                     services.AddTransient<IMountOrchestrator, MountOrchestrator>();
                     services.AddTransient<IUnmountOrchestrator, UnmountOrchestrator>();
+                    services.AddSingleton<IUserSettingsService, UserSettingsService>();
+                    services.AddSingleton<IPlatformCapabilityService, PlatformCapabilityService>();
 
                     // Register ScriptExecutor with all focused interfaces
                     services.AddSingleton<ScriptExecutor>();
@@ -95,6 +98,9 @@ public partial class App : Application
                 services.AddSingleton<UiDispatcher>();
                 services.AddSingleton<IUiDispatcher>(sp => sp.GetRequiredService<UiDispatcher>());
                 services.AddSingleton<IDialogService, DialogService>();
+                services.TryAddSingleton<ILinkOpenerService, LinkOpenerService>();
+                services.TryAddSingleton<IHyperVEnableService, HyperVEnableService>();
+                services.TryAddSingleton<ISetupWizardService, SetupWizardService>();
 
                 // ViewModels
                 services.AddTransient<MainViewModel.MountingServices>(sp => new MainViewModel.MountingServices(

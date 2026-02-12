@@ -1,5 +1,6 @@
 using LiMount.Core.Abstractions;
 using LiMount.Core.Configuration;
+using LiMount.WinUI.Services;
 using LiMount.WinUI.ViewModels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -12,6 +13,7 @@ public sealed partial class MainPage : Page
 {
     private readonly MainViewModel _viewModel;
     private readonly IDialogService _dialogService;
+    private readonly ISetupWizardService _setupWizardService;
     private readonly InitializationConfig _config;
     private readonly ILogger<MainPage> _logger;
     private CancellationTokenSource? _cancellationTokenSource;
@@ -19,12 +21,14 @@ public sealed partial class MainPage : Page
     public MainPage(
         MainViewModel viewModel,
         IDialogService dialogService,
+        ISetupWizardService setupWizardService,
         IOptions<LiMountConfiguration> config,
         ILogger<MainPage> logger)
     {
         InitializeComponent();
         _viewModel = viewModel;
         _dialogService = dialogService;
+        _setupWizardService = setupWizardService;
         _config = config.Value.Initialization;
         _logger = logger;
 
@@ -49,6 +53,11 @@ public sealed partial class MainPage : Page
 
         try
         {
+            if (!await EnsureSetupAsync(_cancellationTokenSource.Token))
+            {
+                return;
+            }
+
             await InitializeWithRetriesAsync(_viewModel, _cancellationTokenSource.Token);
         }
         catch (Exception ex)
@@ -70,6 +79,38 @@ public sealed partial class MainPage : Page
 
             Application.Current.Exit();
         }
+    }
+
+    private async Task<bool> EnsureSetupAsync(CancellationToken cancellationToken)
+    {
+        var forceWizard = string.Equals(
+            Environment.GetEnvironmentVariable("LIMOUNT_TEST_FORCE_WIZARD"),
+            "1",
+            StringComparison.OrdinalIgnoreCase);
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var setupResult = await _setupWizardService.EnsureSetupAsync(forceWizard, cancellationToken);
+            if (setupResult.IsCompleted)
+            {
+                return true;
+            }
+
+            var shouldExit = await _dialogService.ConfirmAsync(
+                "Setup was canceled. LiMount requires setup to continue.\n\nDo you want to exit now?",
+                "Setup Required",
+                DialogType.Warning);
+
+            if (shouldExit)
+            {
+                Application.Current.Exit();
+                return false;
+            }
+
+            forceWizard = true;
+        }
+
+        return false;
     }
 
     private async Task InitializeWithRetriesAsync(MainViewModel viewModel, CancellationToken cancellationToken)

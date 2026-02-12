@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentDialog
+    x:Class="LiMount.WinUI.Views.SetupWizardDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="LiMount Setup Wizard"
+    PrimaryButtonText="Save and Continue"
+    CloseButtonText="Cancel Setup"
+    DefaultButton="Primary">
+    <ContentDialog.Resources>
+        <x:Boolean x:Key="UseCompactResources">True</x:Boolean>
+    </ContentDialog.Resources>
+    <ScrollViewer MaxHeight="720">
+        <StackPanel Spacing="16">
+            <StackPanel Spacing="4">
+                <TextBlock Text="Step 1: Detect your environment"
+                           FontSize="18"
+                           FontWeight="SemiBold"/>
+                <TextBlock Text="Review detected capabilities and run setup actions as needed."
+                           TextWrapping="Wrap"/>
+            </StackPanel>
+
+            <Grid ColumnSpacing="12" RowSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="180"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Windows Edition:" FontWeight="SemiBold"/>
+                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Capabilities.WindowsEdition}"/>
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="WSL:" FontWeight="SemiBold"/>
+                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding WslAvailabilityText}" TextWrapping="Wrap"/>
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Hyper-V:" FontWeight="SemiBold"/>
+                <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding HyperVAvailabilityText}" TextWrapping="Wrap"/>
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="VMware:" FontWeight="SemiBold"/>
+                <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding VmwareAvailabilityText}" TextWrapping="Wrap"/>
+
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="VirtualBox:" FontWeight="SemiBold"/>
+                <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding VirtualBoxAvailabilityText}" TextWrapping="Wrap"/>
+            </Grid>
+
+            <StackPanel Orientation="Vertical"
+                        HorizontalAlignment="Left">
+                <Button Content="Enable Hyper-V (Admin)"
+                        Click="EnableHyperV_Click"
+                        Visibility="{Binding ShowEnableHyperVButton, Converter={StaticResource BooleanToVisibilityConverter}}"
+                        Margin="0,0,8,8"/>
+                <Button Content="Open Hyper-V docs"
+                        Click="OpenHyperVDocs_Click"
+                        Margin="0,0,8,8"/>
+                <Button Content="Open WSL docs"
+                        Click="OpenWslDocs_Click"
+                        Margin="0,0,8,8"/>
+                <Button Content="VMware download"
+                        Click="OpenVmwareDownload_Click"
+                        Visibility="{Binding ShowVmwareDownloadButton, Converter={StaticResource BooleanToVisibilityConverter}}"
+                        Margin="0,0,8,8"/>
+                <Button Content="VirtualBox download"
+                        Click="OpenVirtualBoxDownload_Click"
+                        Visibility="{Binding ShowVirtualBoxDownloadButton, Converter={StaticResource BooleanToVisibilityConverter}}"
+                        Margin="0,0,8,8"/>
+                <Button Content="Hyper-V app compatibility help"
+                        Click="OpenHyperVCompatHelp_Click"
+                        Margin="0,0,8,8"/>
+            </StackPanel>
+
+            <Border BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    Visibility="{Binding ShowHyperVActionStatus, Converter={StaticResource BooleanToVisibilityConverter}}"
+                    Padding="8">
+                <TextBlock Text="{Binding HyperVActionStatus}"
+                           TextWrapping="Wrap"/>
+            </Border>
+
+            <StackPanel Spacing="4">
+                <TextBlock Text="Step 2: Choose mount strategy"
+                           FontSize="18"
+                           FontWeight="SemiBold"/>
+                <ComboBox x:Name="BackendPreferenceCombo"
+                          ItemsSource="{Binding Backends}"
+                          DisplayMemberPath="Label"
+                          SelectedValuePath="Value"
+                          SelectedValue="{Binding SelectedBackendPreference, Mode=TwoWay}"/>
+            </StackPanel>
+
+            <StackPanel Spacing="4">
+                <TextBlock Text="Fallback behavior"
+                           FontWeight="SemiBold"/>
+                <ComboBox x:Name="FallbackPolicyCombo"
+                          ItemsSource="{Binding FallbackPolicies}"
+                          DisplayMemberPath="Label"
+                          SelectedValuePath="Value"
+                          SelectedValue="{Binding SelectedVmFallbackPolicy, Mode=TwoWay}"/>
+            </StackPanel>
+
+            <StackPanel Spacing="6">
+                <TextBlock Text="Step 3: Choose hypervisor provider"
+                           FontSize="18"
+                           FontWeight="SemiBold"/>
+                <RadioButton x:Name="AutoHypervisorRadio"
+                             Content="Auto (recommended)"
+                             Checked="AutoHypervisorRadio_Checked"/>
+                <RadioButton x:Name="HyperVRadio"
+                             Content="Hyper-V"
+                             IsEnabled="{Binding IsHyperVSelectable}"
+                             Checked="HyperVRadio_Checked"/>
+                <RadioButton x:Name="VmwareRadio"
+                             Content="VMware Workstation"
+                             IsEnabled="{Binding IsVmwareSelectable}"
+                             Checked="VmwareRadio_Checked"/>
+                <RadioButton x:Name="VirtualBoxRadio"
+                             Content="VirtualBox"
+                             IsEnabled="{Binding IsVirtualBoxSelectable}"
+                             Checked="VirtualBoxRadio_Checked"/>
+            </StackPanel>
+
+            <StackPanel Spacing="4">
+                <TextBlock Text="Step 4: Windows access mode"
+                           FontSize="18"
+                           FontWeight="SemiBold"/>
+                <ComboBox x:Name="AccessModeCombo"
+                          ItemsSource="{Binding AccessModes}"
+                          DisplayMemberPath="Label"
+                          SelectedValuePath="Value"
+                          SelectedValue="{Binding SelectedAccessMode, Mode=TwoWay}"/>
+            </StackPanel>
+
+            <StackPanel Spacing="4">
+                <TextBlock Text="Step 5: Summary and test"
+                           FontSize="18"
+                           FontWeight="SemiBold"/>
+                <Border BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Padding="8">
+                    <TextBlock Text="{Binding SummaryText}" TextWrapping="Wrap"/>
+                </Border>
+                <Button Content="Test configuration"
+                        Click="TestConfiguration_Click"
+                        HorizontalAlignment="Left"/>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</ContentDialog>

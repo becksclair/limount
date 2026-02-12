@@ -10,6 +10,7 @@ namespace LiMount.Core.Serialization;
 [JsonSourceGenerationOptions(WriteIndented = true)]
 [JsonSerializable(typeof(List<ActiveMount>))]
 [JsonSerializable(typeof(List<MountHistoryEntry>))]
+[JsonSerializable(typeof(UserSettings))]
 internal partial class LiMountJsonContext : JsonSerializerContext
 {
 }

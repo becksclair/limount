@@ -11,6 +11,17 @@ So the wizard must:
 * Offer VMware/VirtualBox when Hyper-V is unavailable or undesired.
 * Be explicit about trade-offs and required user actions.
 
+## Current implementation status (2026-02-12)
+
+- Completed in code:
+  - V0 settings + capability detection.
+  - V1 first-run setup wizard integration and persistence.
+  - Wizard default recommendations and conditional button visibility.
+  - VMware/VirtualBox detection hardening (PATH + Program Files + registry).
+  - Hyper-V detection hardening using `dism.exe` + native checks (no PowerShell probe dependency).
+- In progress/remaining:
+  - `NL1`, `HV1`, `HV2`, `GA1`, `CO1`, and follow-on HIL/docs milestones.
+
 ---
 
 # High-level goals and key decisions
