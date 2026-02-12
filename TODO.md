@@ -135,6 +135,7 @@ graph TD
 | ID   | Task                                                      | Subtasks                                                                                                                                                                                                                                                                   | Depends On    | Context                                                                             |
 | ---- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | ----------------------------------------------------------------------------------- |
 | TST1 | Deterministic tests + UI tests for wizard/access/fallback | - Extend `TestMode` scenarios: missing settings triggers wizard; provider gating; WSL fails then VM succeeds<br>- Add unit tests for coordinator decision logic + rollback ordering<br>- Update `LiMount.UITests` to validate network location UX instead of drive letters | V1, NL1, CO1  | Prevents regressions across complex setup/fallback flows.                           |
+| TST2 | Deferred VM fallback E2E screenshot batch (mounted + Explorer) | - Enable only after `CO1` + `HIL1` are complete<br>- Capture mounted-state screenshot after VM fallback success and active mount<br>- Capture Windows Explorer screenshot with the network share open<br>- Use deterministic filenames `vm-fallback-mounted.png` and `vm-fallback-explorer-network-share-open.png` under `screenshots/ui-batch/<timestamp>/` | CO1, HIL1 | Adds explicit visual acceptance evidence for VM fallback UX and network-share Explorer integration. |
 | HIL1 | HIL VM fallback verification harness                      | - Add `scripts/run-hil-vm-fallback-test.ps1` to validate: WSL unsupported -> VM fallback success -> cleanup<br>- Add integration test docs updates with env vars and prerequisites                                                                                         | CO1, HV1, GA1 | Real hardware validation is essential for disk attach + UAC + networking realities. |
 | DOC1 | Documentation updates (README + setup + troubleshooting)  | - README: "Network Locations default", "Hyper-V preferred fallback", "VM-only mode"<br>- Docs: first-run wizard guide; Hyper-V enablement; troubleshooting share/auth; fallback triggers                                                                                   | NL1, CO1      | Keeps the feature discoverable and reduces support load.                            |
 | VMW1 | VMware provider (optional)                                | - Detect vmrun and show wizard option when installed<br>- Basic start/stop + guest connectivity<br>- Disk attach automation later (behind feature flag)                                                                                                                    | V1            | Covers Windows Home and users who prefer VMware.                                    |
@@ -147,6 +148,37 @@ graph TD
 | NL2  | Drive-letter deprecation + UI simplification      | - Hide drive-letter UI behind "Legacy" toggle<br>- Remove drive-letter assumptions from restore/state paths<br>- Keep legacy mapping only for those who explicitly enable it | NL1, CO1   | Reduces complexity long-term; lowers UAC/session edge cases. |
 | OPT1 | Appliance image lifecycle (download/update)       | - Download-on-demand appliance image (or provisioning via cloud-init)<br>- Version/checksum verification + update prompts                                                    | HV2        | Improves UX and reduces manual VM management.                |
 | OPT2 | Multi-mount + concurrent sessions across backends | - Support multiple active mounts and isolate share paths<br>- Add locking for disk attach conflicts                                                                          | CO1        | Future scalability once single-mount UX is stable.           |
+
+### Implementation Progress (2026-02-12)
+
+- V0 is implemented:
+  - Added user settings persistence (`%LocalAppData%\LiMount\settings.json`) and versioned settings model/service.
+  - Added platform capability detection service/model with unavailable-reason strings for UI.
+  - VMware/VirtualBox detection now checks PATH, Program Files, and registry install paths.
+- V1 core wizard slice is implemented:
+  - First-run setup wizard is wired before strict startup validation.
+  - Wizard persists mount strategy, fallback policy, hypervisor selection, and Windows access mode.
+  - Sensible first-run defaults are auto-selected:
+    - `BackendPreference=WslPreferred`
+    - `VmFallbackPolicy=OnFsIncompatibility` when any VM provider is available, otherwise `Disabled`
+    - Hypervisor recommendation priority: Hyper-V -> VMware -> VirtualBox -> Auto
+    - `AccessMode=NetworkLocation`
+  - Buttons are now conditional:
+    - Hide `Enable Hyper-V` when Hyper-V is already ready.
+    - Hide VMware/VirtualBox download buttons when those tools are detected.
+  - Hyper-V status text is only shown when relevant (no default "action not run" noise).
+- Detection hardening completed after field feedback:
+  - Removed PowerShell probes from `PlatformCapabilityService` for Hyper-V capability checks.
+  - Hyper-V detection now uses `dism.exe` + native WMI/service/module checks.
+  - Hyper-V enable action now runs elevated `dism.exe` instead of elevated PowerShell.
+- Verification evidence (latest run):
+  - `dotnet build --nologo` passed.
+  - `dotnet test LiMount.Tests --nologo --filter FullyQualifiedName~LiMount.Tests.Services.PlatformCapabilityServiceTests` passed (11 tests).
+  - `dotnet test LiMount.Tests --nologo --filter FullyQualifiedName~LiMount.Tests.Services.HyperVEnableServiceTests` passed (7 tests).
+  - `dotnet test LiMount.Tests --nologo --filter FullyQualifiedName~LiMount.Tests.ViewModels.SetupWizardViewModelTests` passed (5 tests).
+  - `dotnet test LiMount.Tests --nologo --filter FullyQualifiedName~LiMount.Tests.Services.SetupWizardServiceTests` passed (4 tests).
+  - `LIMOUNT_RUN_UI_TESTS=1 dotnet test LiMount.UITests --nologo` passed (3 tests).
+- Remaining roadmap items not started in this slice: `NL1`, `HV1`, `HV2`, `GA1`, `CO1`, `TST2`, `HIL1`, `DOC1`.
 
 ### Open Questions (VM Roadmap)
 

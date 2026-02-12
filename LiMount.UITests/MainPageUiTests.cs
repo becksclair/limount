@@ -17,7 +17,8 @@ public class MainPageUiTests
     private const string DriveLetterComboBoxId = "DriveLetterComboBox";
     private const string MountButtonId = "MountButton";
     private const string StatusTextBlockId = "StatusTextBlock";
-    private const string ScreenshotSkillScriptPath = @"C:\Users\Rebecca\.codex\skills\screenshot\scripts\take_screenshot.ps1";
+    private const string VmFallbackMountedScreenshotFileName = "vm-fallback-mounted.png";
+    private const string VmFallbackExplorerScreenshotFileName = "vm-fallback-explorer-network-share-open.png";
 
     private readonly ITestOutputHelper _output;
 
@@ -66,6 +67,41 @@ public class MainPageUiTests
         Assert.DoesNotContain("failed", status, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void ForcedWizardScenario_CanContinueAndMount()
+    {
+        if (!ShouldRunUiTests())
+        {
+            _output.WriteLine("Skipping UI test. Set LIMOUNT_RUN_UI_TESTS=1 to enable.");
+            return;
+        }
+
+        var launched = LaunchAppForScenario("success", forceWizard: true);
+        var status = RunMountFlowAndReadStatus(
+            launched.Application,
+            launched.Automation,
+            text => text.Contains("Success!", StringComparison.OrdinalIgnoreCase),
+            "forced_wizard");
+
+        Assert.Contains("Success!", status, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact(Skip = "Deferred until VM fallback is complete (CO1) and HIL VM fallback verification is in place (HIL1).")]
+    public void VmFallbackE2e_CapturesMountedAndExplorerNetworkShareScreenshots()
+    {
+        // Deferred acceptance sequence once VM fallback is implemented:
+        // 1) Force fallback path: WSL incompatibility -> VM fallback success.
+        // 2) Verify the app shows mounted state for the fallback-backed partition.
+        // 3) Invoke Open in Explorer for the network share target.
+        // 4) Capture app + Explorer screenshots via vendored scripts/take_screenshot.ps1.
+        //
+        // Required output convention:
+        // screenshots/ui-batch/<timestamp>/vm-fallback-mounted.png
+        // screenshots/ui-batch/<timestamp>/vm-fallback-explorer-network-share-open.png
+        _output.WriteLine(
+            $"Reserved VM fallback screenshot filenames: {VmFallbackMountedScreenshotFileName}, {VmFallbackExplorerScreenshotFileName}.");
+    }
+
     private static bool ShouldRunUiTests()
     {
         return string.Equals(
@@ -74,7 +110,7 @@ public class MainPageUiTests
             StringComparison.OrdinalIgnoreCase);
     }
 
-    private (Application Application, UIA3Automation Automation) LaunchAppForScenario(string scenario)
+    private (Application Application, UIA3Automation Automation) LaunchAppForScenario(string scenario, bool forceWizard = false)
     {
         var executablePath = GetWinUiExecutablePath();
         if (!File.Exists(executablePath))
@@ -89,6 +125,7 @@ public class MainPageUiTests
         };
         startInfo.Environment["LIMOUNT_TEST_MODE"] = "1";
         startInfo.Environment["LIMOUNT_TEST_SCENARIO"] = scenario;
+        startInfo.Environment["LIMOUNT_TEST_FORCE_WIZARD"] = forceWizard ? "1" : "0";
 
         var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to launch WinUI app process for UI test.");
@@ -101,6 +138,22 @@ public class MainPageUiTests
 
     private static string GetWinUiExecutablePath()
     {
+        return Path.Combine(
+            GetSolutionRootPath(),
+            "LiMount.WinUI",
+            "bin", "x64", "Debug",
+            "net10.0-windows10.0.26100.0",
+            "win-x64",
+            "LiMount.WinUI.exe");
+    }
+
+    private static string GetScreenshotScriptPath()
+    {
+        return Path.Combine(GetSolutionRootPath(), "scripts", "take_screenshot.ps1");
+    }
+
+    private static string GetSolutionRootPath()
+    {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
         while (current != null && !File.Exists(Path.Combine(current.FullName, "LiMount.sln")))
         {
@@ -112,13 +165,7 @@ public class MainPageUiTests
             throw new DirectoryNotFoundException("Unable to locate solution root containing LiMount.sln.");
         }
 
-        return Path.Combine(
-            current.FullName,
-            "LiMount.WinUI",
-            "bin", "x64", "Debug",
-            "net10.0-windows10.0.26100.0",
-            "win-x64",
-            "LiMount.WinUI.exe");
+        return current.FullName;
     }
 
     private string RunMountFlowAndReadStatus(
@@ -134,6 +181,8 @@ public class MainPageUiTests
                 timeout: TimeSpan.FromSeconds(30),
                 throwOnTimeout: true).Result
                 ?? throw new InvalidOperationException("Main window was not found.");
+
+            CompleteSetupWizardIfPresent(window);
 
             WaitForComboToHaveItems(window, DiskComboBoxId, "disk");
             WaitForComboToHaveItems(window, DriveLetterComboBoxId, "drive letter");
@@ -170,6 +219,21 @@ public class MainPageUiTests
 
             automation.Dispose();
         }
+    }
+
+    private void CompleteSetupWizardIfPresent(Window window)
+    {
+        var wizardSaveButton = Retry.WhileNull(
+            () => window.FindFirstDescendant(cf => cf.ByName("Save and Continue"))?.AsButton(),
+            timeout: TimeSpan.FromSeconds(8)).Result;
+
+        if (wizardSaveButton == null)
+        {
+            return;
+        }
+
+        _output.WriteLine("Setup wizard detected in UI test. Completing it.");
+        wizardSaveButton.Invoke();
     }
 
     private static Button GetButton(Window window, string automationId)
@@ -260,9 +324,10 @@ public class MainPageUiTests
             return;
         }
 
-        if (!File.Exists(ScreenshotSkillScriptPath))
+        var screenshotScriptPath = GetScreenshotScriptPath();
+        if (!File.Exists(screenshotScriptPath))
         {
-            _output.WriteLine($"Screenshot skill script not found at '{ScreenshotSkillScriptPath}'.");
+            _output.WriteLine($"Screenshot helper script not found at '{screenshotScriptPath}'.");
             return;
         }
 
@@ -271,7 +336,7 @@ public class MainPageUiTests
             var nativeHandle = window.Properties.NativeWindowHandle.ValueOrDefault;
             var captureArgs = BuildScreenshotCaptureArgs(window, nativeHandle);
             var psi = new ProcessStartInfo("powershell",
-                $"-ExecutionPolicy Bypass -File \"{ScreenshotSkillScriptPath}\" -Mode temp {captureArgs}")
+                $"-ExecutionPolicy Bypass -File \"{screenshotScriptPath}\" -Mode temp {captureArgs}")
             {
                 UseShellExecute = false,
                 RedirectStandardOutput = true,

@@ -86,4 +86,5 @@ packages/
 # Logs
 *.log
 logs/
+screenshots/
 .claude/settings.local.json

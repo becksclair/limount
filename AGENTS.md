@@ -43,6 +43,21 @@ Remove-Item Env:\LIMOUNT_RUN_UI_TESTS
 Remove-Item Env:\LIMOUNT_CAPTURE_SCREENSHOT
 ```
 
+Full UI screenshot batch (main states + setup wizard + dropdowns):
+
+```powershell
+$env:LIMOUNT_RUN_UI_TESTS='1'
+$env:LIMOUNT_CAPTURE_SCREENSHOT_BATCH='1'
+dotnet test LiMount.UITests --filter "FullyQualifiedName~ScreenshotBatchUiTests"
+Remove-Item Env:\LIMOUNT_RUN_UI_TESTS
+Remove-Item Env:\LIMOUNT_CAPTURE_SCREENSHOT_BATCH
+```
+
+Batch output location:
+
+- `screenshots\ui-batch\<yyyyMMdd-HHmmss>\`
+- Includes deterministic filenames such as `01-main-initial.png` through `12-main-after-wizard.png`
+
 ### 3) Hardware-in-loop (real WSL + disk) regression workflow
 
 Single expected-failure validation (for unsupported XFS feature cases):
