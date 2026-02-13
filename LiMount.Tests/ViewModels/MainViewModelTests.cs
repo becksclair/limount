@@ -81,11 +81,14 @@ public class MainViewModelTests
             _mockLogger.Object,
             _mockConfig.Object);
 
-        return new MainViewModel(
+        var vm = new MainViewModel(
             mountingServices,
             appServices,
             () => null!, // HistoryWindow factory - not used in tests
             _mockUiDispatcher.Object);
+
+        vm.SetAccessMode(WindowsAccessMode.DriveLetterLegacy);
+        return vm;
     }
 
     [Fact]
@@ -354,7 +357,7 @@ public class MainViewModelTests
         };
 
         _mockMountOrchestrator
-            .Setup(m => m.MountAndMapAsync(1, 1, 'Z', It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IProgress<string>>(), It.IsAny<CancellationToken>()))
+            .Setup(m => m.MountAndMapAsync(1, 1, WindowsAccessMode.DriveLetterLegacy, 'Z', It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IProgress<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(mountResult);
 
         // Act
@@ -383,7 +386,7 @@ public class MainViewModelTests
         };
 
         _mockMountOrchestrator
-            .Setup(m => m.MountAndMapAsync(1, 1, 'Z', It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IProgress<string>>(), It.IsAny<CancellationToken>()))
+            .Setup(m => m.MountAndMapAsync(1, 1, WindowsAccessMode.DriveLetterLegacy, 'Z', It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IProgress<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(mountResult);
 
         // Act

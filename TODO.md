@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-LiMount had overlapping regressions in release startup reliability (trim-sensitive runtime bindings) and mount pipeline correctness (WSL command invocation, rollback safety, and partition-scoped state cleanup). The highest-risk failures are now addressed in code, including release trimming disablement, raw WSL distro listing, partition-safe state APIs, and stronger mapping verification paths. Remaining work is focused on UI polish, additional diagnostics, and broader manual validation across real Windows + WSL environments.
+LiMount had overlapping regressions in release startup reliability (trim-sensitive runtime bindings) and mount pipeline correctness (WSL command invocation, rollback safety, and partition-scoped state cleanup). The highest-risk failures are now addressed in code, including release trimming disablement, raw WSL distro listing, partition-safe state APIs, and stronger mapping verification paths. The NL1 contract shift is now implemented: `NetworkLocation` is the default Windows access mode, `DriveLetterLegacy` remains explicit legacy behavior, and `None` is mount-only. Remaining work is focused on VM fallback execution (`HV1/HV2/GA1/CO1`), HIL fallback validation, and follow-up docs for VM-specific flows.
 
 ## Task Dependency Graph
 
@@ -178,7 +178,14 @@ graph TD
   - `dotnet test LiMount.Tests --nologo --filter FullyQualifiedName~LiMount.Tests.ViewModels.SetupWizardViewModelTests` passed (5 tests).
   - `dotnet test LiMount.Tests --nologo --filter FullyQualifiedName~LiMount.Tests.Services.SetupWizardServiceTests` passed (4 tests).
   - `LIMOUNT_RUN_UI_TESTS=1 dotnet test LiMount.UITests --nologo` passed (3 tests).
-- Remaining roadmap items not started in this slice: `NL1`, `HV1`, `HV2`, `GA1`, `CO1`, `TST2`, `HIL1`, `DOC1`.
+- NL1 is now implemented:
+  - Added `IWindowsAccessService` with mode-based routing (`NetworkLocation`, `DriveLetterLegacy`, `None`).
+  - Added `scripts/network/Create-NetworkLocation.ps1` and `scripts/network/Remove-NetworkLocation.ps1`.
+  - Updated mount/unmount orchestrators and contracts to be access-mode-first.
+  - Updated state/history/result models to persist access metadata.
+  - Updated UI/TestMode and screenshot batch tests for default hidden drive-letter picker in `NetworkLocation` mode.
+- Remaining roadmap items not started in this slice: `HV1`, `HV2`, `GA1`, `CO1`, `TST2`, `HIL1`.
+- `DOC1` is partially started (NL1 docs updated); VM fallback documentation remains pending `CO1`.
 
 ### Open Questions (VM Roadmap)
 
@@ -301,23 +308,24 @@ public static class ExternalLinks
 
 **Checklist**
 
-* [ ] Add `IWindowsAccessService` with:
+* [x] Add `IWindowsAccessService` with:
 
   * NetworkLocation (default)
   * DriveLetterLegacy (existing scripts)
-  * UncOnly (no-op + "Open" button)
-* [ ] Add scripts:
+  * None (mount-only, no Windows integration)
+* [x] Add scripts:
 
   * `scripts/network/Create-NetworkLocation.ps1`
   * `scripts/network/Remove-NetworkLocation.ps1`
-* [ ] Update orchestrator to use access service rather than always mapping drive letters
-* [ ] Update UI to default to Network Location naming (no drive letter selection)
+* [x] Update orchestrator to use access service rather than always mapping drive letters
+* [x] Update UI to default to Network Location naming (no drive letter selection)
+* [x] Update mount-state reconciliation so non-legacy modes are not pruned for missing drive letters
 
 **Acceptance criteria**
 
-* WSL mount creates a Network Location pointing to the UNC.
-* Unmount removes it.
-* Drive-letter mapping still available behind "Legacy" toggle.
+* WSL mount creates a Network Location pointing to the UNC. ✅
+* Unmount removes it. ✅
+* Drive-letter mapping remains available via `DriveLetterLegacy` mode. ✅
 
 (References: location and structure for NetHood shortcuts. ([Super User][1]))
 
@@ -433,7 +441,8 @@ public static class ExternalLinks
 
 * [ ] TestMode scenario: missing settings -> wizard
 * [ ] TestMode scenario: WSL fails with XFS unsupported -> VM fallback succeeds
-* [ ] Update `LiMount.UITests` assertions from drive letters to Network Location/UNC open behavior
+* [x] Update `LiMount.UITests` assertions from drive letters to Network Location/UNC open behavior
+* [x] Keep deterministic screenshot batch naming while default mode hides drive-letter picker
 * [ ] Add unit tests for coordinator decision logic and rollback ordering
 
 **Acceptance criteria**
@@ -472,15 +481,15 @@ public static class ExternalLinks
 
 **Checklist**
 
-* [ ] README: update known limitations ("No VM fallback" removed), Network Locations default, Hyper‑V requirements ([Microsoft Learn][3])
-* [ ] Add docs:
+* [x] README and testing docs updated for current NL1 behavior (Network Locations default, legacy/none modes, screenshot workflow)
+* [ ] Add docs for VM fallback and VM-only flows once `CO1` is implemented:
 
   * `docs/setup/first-run-wizard.md`
   * `docs/vm-fallback/hyperv.md`
   * `docs/setup/network-locations.md`
   * `docs/security/credentials.md`
   * `docs/testing/hil-vm-fallback.md`
-* [ ] Update incident follow-up doc to link to VM fallback
+* [ ] Update incident follow-up doc to link to VM fallback after fallback implementation lands
 
 **Acceptance criteria**
 
@@ -521,12 +530,12 @@ public static class ExternalLinks
 
 If you're sequencing for fastest value:
 
-1. **V0 + V1 (settings + wizard)**
-2. **NL1 (Network Locations default for WSL)**
-3. **HV1 + HV2 (Hyper‑V provider + appliance provisioning)**
+1. **V0 + V1 (settings + wizard)** ✅
+2. **NL1 (Network Locations default for WSL)** ✅
+3. **HV1 + HV2 (Hyper‑V provider + appliance provisioning)** (next)
 4. **GA1 (guest agent)**
 5. **CO1 (silent fallback + VM-only)**
-6. Tests + HIL + Docs
+6. HIL VM fallback + remaining docs (TST2/HIL1/DOC1)
 
 This order gives visible progress early and reduces scope risk.
 
@@ -577,3 +586,14 @@ The regression was not a single bug. It was a coupled reliability issue across s
 * HIL drive-level verification passed:
   * `powershell -ExecutionPolicy Bypass -File .\scripts\run-hil-mount-test.ps1 -DiskIndex 1 -VerifyDriveEndToEnd -FailurePartition 2`
   * Expected failure on partition 2 and successful mount+unmount on partition 1 were both confirmed.
+
+## Session Verification Evidence (February 13, 2026 - NL1 Implementation)
+
+- `dotnet build --nologo` passed.
+* `dotnet test LiMount.Tests --nologo` passed (`303` tests).
+* `dotnet test LiMount.Tests --nologo --filter FullyQualifiedName~MountOrchestratorTests` passed (`14` tests).
+* `dotnet test LiMount.Tests --nologo --filter FullyQualifiedName~UnmountOrchestratorTests` passed (`6` tests).
+* `dotnet test LiMount.Tests --nologo --filter FullyQualifiedName~MainViewModelTests` passed (`16` tests).
+* `$env:LIMOUNT_RUN_UI_TESTS='1'; dotnet test LiMount.UITests --nologo; Remove-Item Env:\LIMOUNT_RUN_UI_TESTS` passed (`4` tests).
+* `$env:LIMOUNT_RUN_UI_TESTS='1'; $env:LIMOUNT_CAPTURE_SCREENSHOT_BATCH='1'; dotnet test LiMount.UITests --nologo --filter FullyQualifiedName~ScreenshotBatchUiTests; Remove-Item Env:\LIMOUNT_RUN_UI_TESTS; Remove-Item Env:\LIMOUNT_CAPTURE_SCREENSHOT_BATCH` passed.
+* Screenshot artifacts generated under `screenshots\ui-batch\20260213-020229\` with all deterministic filenames present and non-empty.

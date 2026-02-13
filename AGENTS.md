@@ -2,7 +2,10 @@
 
 ## What
 
-LiMount mounts Linux partitions into WSL2 and maps them as Windows drive letters.
+LiMount mounts Linux partitions into WSL2 and exposes them in Windows through mode-based access:
+- `NetworkLocation` (default)
+- `DriveLetterLegacy` (explicit legacy mode)
+- `None` (mount-only, no Windows integration)
 
 ## Structure
 
@@ -10,7 +13,7 @@ LiMount mounts Linux partitions into WSL2 and maps them as Windows drive letters
 - **LiMount.WinUI** - WinUI 3 UI (.NET 10, Windows 11)
 - **LiMount.Tests** - Unit and integration tests
 - **LiMount.UITests** - Deterministic UI automation tests (FlaUI)
-- **scripts/** - PowerShell scripts for mount/unmount + HIL test runner
+- **scripts/** - PowerShell scripts for mount/unmount, Windows access integration, and HIL test runners
 
 ## Default Workflows
 
@@ -56,7 +59,8 @@ Remove-Item Env:\LIMOUNT_CAPTURE_SCREENSHOT_BATCH
 Batch output location:
 
 - `screenshots\ui-batch\<yyyyMMdd-HHmmss>\`
-- Includes deterministic filenames such as `01-main-initial.png` through `12-main-after-wizard.png`
+- Deterministic filenames `01-main-initial.png` through `12-main-after-wizard.png`
+- In default `NetworkLocation` mode, drive-letter picker is hidden; screenshot `04-main-drive-letter-dropdown-open.png` is still generated to keep deterministic naming.
 
 ### 3) Hardware-in-loop (real WSL + disk) regression workflow
 
@@ -107,9 +111,11 @@ Canonical pickup artifact: `bin\LiMount.WinUI.exe`
 
 - Services injected via DI (interfaces in `LiMount.Core/Interfaces/`)
 - Config via `IOptions<LiMountConfiguration>` from `appsettings.json`
-- Mount state tracked by `IMountStateService` (singleton)
+- User defaults via `%LocalAppData%\LiMount\settings.json` (`AccessMode` defaults to `NetworkLocation`)
+- Mount state tracked by `IMountStateService` (singleton), including access metadata
 - Orchestrators coordinate workflows and validation
-- Result objects (`MountAndMapResult`, `UnmountAndUnmapResult`) for outcomes
+- `IWindowsAccessService` owns Windows-side integration routing (`NetworkLocation` / `DriveLetterLegacy` / `None`)
+- Result objects (`MountAndMapResult`, `UnmountAndUnmapResult`) are mode-aware and persisted to history/state
 
 ## Logs
 

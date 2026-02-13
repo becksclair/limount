@@ -2,6 +2,7 @@ using LiMount.Core.Abstractions;
 using LiMount.Core.Configuration;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Services;
+using LiMount.Core.Services.Access;
 using LiMount.WinUI.Services;
 using LiMount.WinUI.TestMode;
 using LiMount.WinUI.ViewModels;
@@ -76,6 +77,7 @@ public partial class App : Application
                     services.AddSingleton<IEnvironmentValidationService, EnvironmentValidationService>();
                     services.AddTransient<IMountOrchestrator, MountOrchestrator>();
                     services.AddTransient<IUnmountOrchestrator, UnmountOrchestrator>();
+                    services.AddSingleton<IWindowsAccessService, WindowsAccessService>();
                     services.AddSingleton<IUserSettingsService, UserSettingsService>();
                     services.AddSingleton<IPlatformCapabilityService, PlatformCapabilityService>();
 

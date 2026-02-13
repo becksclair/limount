@@ -3,6 +3,7 @@
 **Status**: Accepted
 
 **Date**: 2025-11-18
+**Updated**: 2026-02-13 (NL1 access-mode contract update)
 
 **Deciders**: Development Team
 
@@ -12,13 +13,13 @@
 
 ## Context and Problem Statement
 
-Mounting a disk and mapping it to a drive letter involves multiple steps:
+Mounting a disk and creating Windows access involves multiple steps:
 1. Validate parameters
 2. Check if disk is already mounted
 3. Execute WSL mount script (elevated PowerShell)
 4. Verify mount success
 5. Wait for UNC path to become accessible (with retry)
-6. Map UNC path to Windows drive letter
+6. Create Windows access surface based on access mode (`NetworkLocation`, `DriveLetterLegacy`, `None`)
 7. Record mount in state service
 8. Log to history service
 9. Report progress to UI throughout
@@ -45,7 +46,7 @@ Similar complexity exists for unmount operations. We need a pattern that:
 ```csharp
 public class MountService
 {
-    public async Task<bool> MountAndMapAsync(int diskIndex, int partition, char driveLetter, IProgress<string> progress)
+    public async Task<bool> MountAndMapAsync(int diskIndex, int partition, WindowsAccessMode accessMode, char? driveLetter, IProgress<string> progress)
     {
         // Validation
         // Check state
@@ -88,8 +89,8 @@ public class MainViewModel
             await Task.Delay(500);
         }
 
-        // Map drive
-        var mapResult = await _scriptExecutor.MapDriveAsync(...);
+        // Create Windows access integration by mode
+        var accessResult = await _windowsAccessService.CreateAccessAsync(...);
 
         // Update state
         await _stateService.RegisterMountAsync(...);
@@ -123,7 +124,8 @@ public class MountOrchestrator : IMountOrchestrator
     public async Task<MountAndMapResult> MountAndMapAsync(
         int diskIndex,
         int partition,
-        char driveLetter,
+        WindowsAccessMode accessMode,
+        char? driveLetter,
         IProgress<string>? progress = null)
     {
         // Validate parameters
@@ -145,10 +147,10 @@ public class MountOrchestrator : IMountOrchestrator
         var uncPath = await WaitForUncAccessibilityAsync(mountResult.UncPath, progress);
         if (uncPath == null) return MountAndMapResult.CreateFailure(..., "unc-accessibility");
 
-        // Map to drive letter
-        progress?.Report($"Mapping to drive {driveLetter}:...");
-        var mapResult = await _executor.ExecuteMapDriveScriptAsync(...);
-        if (!mapResult.Success) return MountAndMapResult.FromMappingFailure(mapResult);
+        // Create Windows access integration by mode
+        progress?.Report("Creating Windows access integration...");
+        var accessResult = await _windowsAccessService.CreateAccessAsync(...);
+        if (accessResult.IsFailure) return MountAndMapResult.CreateFailure(...);
 
         // Update state
         await _stateService.RegisterMountAsync(...);
@@ -232,8 +234,12 @@ public interface IMountOrchestrator
     Task<MountAndMapResult> MountAndMapAsync(
         int diskIndex,
         int partition,
-        char driveLetter,
-        IProgress<string>? progress = null);
+        WindowsAccessMode accessMode,
+        char? driveLetter = null,
+        string fsType = "ext4",
+        string? distroName = null,
+        IProgress<string>? progress = null,
+        CancellationToken cancellationToken = default);
 }
 
 [SupportedOSPlatform("windows")]

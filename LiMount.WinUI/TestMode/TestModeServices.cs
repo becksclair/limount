@@ -152,13 +152,14 @@ internal sealed class TestMountOrchestrator : IMountOrchestrator
     public async Task<MountAndMapResult> MountAndMapAsync(
         int diskIndex,
         int partition,
-        char driveLetter,
+        WindowsAccessMode accessMode,
+        char? driveLetter = null,
         string fsType = "ext4",
         string? distroName = null,
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        progress?.Report($"Test mode mount request: disk {diskIndex} partition {partition} as {driveLetter}:");
+        progress?.Report($"Test mode mount request: disk {diskIndex} partition {partition} mode {accessMode}.");
         await Task.Delay(100, cancellationToken);
 
         if (_scenario == "xfs_unsupported" && diskIndex == 1 && partition == 2)
@@ -173,10 +174,12 @@ internal sealed class TestMountOrchestrator : IMountOrchestrator
         return MountAndMapResult.CreateSuccess(
             diskIndex,
             partition,
-            driveLetter,
+            accessMode,
             "TestDistro",
             $"/mnt/wsl/PHYSICALDRIVE{diskIndex}p{partition}",
-            $@"\\wsl.localhost\TestDistro\mnt\wsl\PHYSICALDRIVE{diskIndex}p{partition}");
+            $@"\\wsl.localhost\TestDistro\mnt\wsl\PHYSICALDRIVE{diskIndex}p{partition}",
+            accessMode == WindowsAccessMode.DriveLetterLegacy ? driveLetter : null,
+            accessMode == WindowsAccessMode.NetworkLocation ? $"LiMount Disk {diskIndex} Partition {partition}" : null);
     }
 }
 
@@ -184,14 +187,18 @@ internal sealed class TestUnmountOrchestrator : IUnmountOrchestrator
 {
     public Task<UnmountAndUnmapResult> UnmountAndUnmapAsync(
         int diskIndex,
+        WindowsAccessMode accessMode,
         char? driveLetter = null,
+        string? networkLocationName = null,
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
         progress?.Report($"Test mode unmount request for disk {diskIndex}.");
         return Task.FromResult(UnmountAndUnmapResult.CreateSuccess(
             diskIndex,
-            driveLetter));
+            accessMode,
+            driveLetter,
+            networkLocationName));
     }
 }
 
@@ -271,7 +278,9 @@ internal sealed class InMemoryMountStateService : IMountStateService
     {
         lock (_sync)
         {
-            return Task.FromResult(_mounts.FirstOrDefault(m => char.ToUpperInvariant(m.DriveLetter) == char.ToUpperInvariant(driveLetter))?.Let(Clone));
+            return Task.FromResult(_mounts.FirstOrDefault(m =>
+                m.DriveLetter.HasValue &&
+                char.ToUpperInvariant(m.DriveLetter.Value) == char.ToUpperInvariant(driveLetter))?.Let(Clone));
         }
     }
 
@@ -287,7 +296,9 @@ internal sealed class InMemoryMountStateService : IMountStateService
     {
         lock (_sync)
         {
-            return Task.FromResult(_mounts.Any(m => char.ToUpperInvariant(m.DriveLetter) == char.ToUpperInvariant(driveLetter)));
+            return Task.FromResult(_mounts.Any(m =>
+                m.DriveLetter.HasValue &&
+                char.ToUpperInvariant(m.DriveLetter.Value) == char.ToUpperInvariant(driveLetter)));
         }
     }
 
@@ -312,7 +323,9 @@ internal sealed class InMemoryMountStateService : IMountStateService
             Id = mount.Id,
             DiskIndex = mount.DiskIndex,
             PartitionNumber = mount.PartitionNumber,
+            AccessMode = mount.AccessMode,
             DriveLetter = mount.DriveLetter,
+            NetworkLocationName = mount.NetworkLocationName,
             DistroName = mount.DistroName,
             MountPathLinux = mount.MountPathLinux,
             MountPathUNC = mount.MountPathUNC,

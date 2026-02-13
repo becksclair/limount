@@ -300,10 +300,11 @@ public class ResultTests
         var legacy = MountAndMapResult.CreateSuccess(
             diskIndex: 1,
             partition: 2,
-            driveLetter: 'Z',
+            accessMode: WindowsAccessMode.DriveLetterLegacy,
             distroName: "Ubuntu",
             mountPathLinux: "/mnt/wsl/PHYSICALDRIVE1p2",
-            mountPathUNC: @"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p2");
+            mountPathUNC: @"\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p2",
+            driveLetter: 'Z');
 
         Result<MountData> result = legacy; // Implicit conversion
 
@@ -333,7 +334,10 @@ public class ResultTests
     [Fact]
     public void UnmountAndUnmapResult_ImplicitConversion_Success()
     {
-        var legacy = UnmountAndUnmapResult.CreateSuccess(diskIndex: 1, driveLetter: 'Z');
+        var legacy = UnmountAndUnmapResult.CreateSuccess(
+            diskIndex: 1,
+            accessMode: WindowsAccessMode.DriveLetterLegacy,
+            driveLetter: 'Z');
 
         Result<UnmountData> result = legacy; // Implicit conversion
 

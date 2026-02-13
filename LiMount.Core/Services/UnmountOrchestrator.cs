@@ -2,17 +2,18 @@ using System.Runtime.Versioning;
 using Microsoft.Extensions.Logging;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
+using LiMount.Core.Results;
 
 namespace LiMount.Core.Services;
 
 /// <summary>
-/// Orchestrates the complete unmount workflow: drive letter unmapping + WSL unmounting.
+/// Orchestrates the complete unmount workflow: Windows access removal + WSL unmounting.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public class UnmountOrchestrator : IUnmountOrchestrator
 {
     private readonly IMountScriptService _mountScriptService;
-    private readonly IDriveMappingService _driveMappingService;
+    private readonly IWindowsAccessService _windowsAccessService;
     private readonly IMountHistoryService? _historyService;
     private readonly ILogger<UnmountOrchestrator>? _logger;
 
@@ -20,47 +21,59 @@ public class UnmountOrchestrator : IUnmountOrchestrator
     /// Initializes a new instance of UnmountOrchestrator with the provided services.
     /// </summary>
     /// <param name="mountScriptService">Service for executing unmount scripts.</param>
-    /// <param name="driveMappingService">Service for drive letter unmapping operations.</param>
+    /// <param name="windowsAccessService">Service for Windows access removal operations.</param>
     /// <param name="historyService">Optional history service for tracking unmount operations.</param>
     /// <param name="logger">Optional logger for diagnostic information.</param>
     /// <exception cref="ArgumentNullException">Thrown when required parameters are null.</exception>
     public UnmountOrchestrator(
         IMountScriptService mountScriptService,
-        IDriveMappingService driveMappingService,
+        IWindowsAccessService windowsAccessService,
         IMountHistoryService? historyService = null,
         ILogger<UnmountOrchestrator>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(mountScriptService);
-        ArgumentNullException.ThrowIfNull(driveMappingService);
+        ArgumentNullException.ThrowIfNull(windowsAccessService);
         _mountScriptService = mountScriptService;
-        _driveMappingService = driveMappingService;
+        _windowsAccessService = windowsAccessService;
         _historyService = historyService;
         _logger = logger;
     }
 
     /// <summary>
-    /// Coordinates unmapping an optional drive letter and unmounting the specified disk from WSL, reporting progress as it proceeds.
+    /// Coordinates Windows access removal and unmounting the specified disk from WSL, reporting progress as it proceeds.
     /// </summary>
     /// <param name="diskIndex">Index of the disk to unmount from WSL.</param>
-    /// <param name="driveLetter">Optional drive letter to unmap before unmounting; pass null to skip unmapping.</param>
+    /// <param name="accessMode">Windows access mode used for the active mount.</param>
+    /// <param name="driveLetter">Optional drive letter used for legacy drive-letter mode.</param>
+    /// <param name="networkLocationName">Optional network location name for network-location mode.</param>
     /// <param name="progress">Optional progress reporter that receives status messages.</param>
     /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>An UnmountAndUnmapResult indicating success (including disk index and optional drive letter) or failure (including disk index, an error message, and the failed operation identifier). The returned drive letter (if any) is only populated when the unmapping operation succeeds. If unmapping fails but unmounting succeeds, the result will have Success = false with FailedStep = "unmap" to indicate the workflow did not complete successfully.</returns>
     public async Task<UnmountAndUnmapResult> UnmountAndUnmapAsync(
         int diskIndex,
+        WindowsAccessMode accessMode,
         char? driveLetter = null,
+        string? networkLocationName = null,
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
         // Validate parameters
         if (diskIndex < 0)
         {
-            return UnmountAndUnmapResult.CreateFailure(diskIndex, "Disk index must be non-negative", "validation");
+            var validationFailure = UnmountAndUnmapResult.CreateFailure(diskIndex, "Disk index must be non-negative", "validation");
+            validationFailure.AccessMode = accessMode;
+            return validationFailure;
         }
 
-        if (driveLetter.HasValue && !char.IsLetter(driveLetter.Value))
+        if (accessMode == WindowsAccessMode.DriveLetterLegacy &&
+            (!driveLetter.HasValue || !char.IsLetter(driveLetter.Value)))
         {
-            return UnmountAndUnmapResult.CreateFailure(diskIndex, "Drive letter must be a valid letter (A-Z)", "validation");
+            var validationFailure = UnmountAndUnmapResult.CreateFailure(
+                diskIndex,
+                "Drive letter is required and must be a valid letter (A-Z) in legacy mode.",
+                "validation");
+            validationFailure.AccessMode = accessMode;
+            return validationFailure;
         }
 
         progress?.Report($"Starting unmount operation for disk {diskIndex}...");
@@ -70,23 +83,44 @@ public class UnmountOrchestrator : IUnmountOrchestrator
         bool unmappingFailed = false;
         string? unmappingError = null;
         
-        if (driveLetter.HasValue)
+        if (accessMode != WindowsAccessMode.None)
         {
-            progress?.Report($"Unmapping drive letter {driveLetter}:...");
-
-            var unmappingResult = await _driveMappingService.ExecuteUnmappingScriptAsync(driveLetter.Value, cancellationToken);
-
-            if (!unmappingResult.Success)
+            progress?.Report(accessMode switch
             {
-                progress?.Report($"Drive unmapping failed: {unmappingResult.ErrorMessage}");
+                WindowsAccessMode.NetworkLocation => "Removing Explorer Network Location...",
+                WindowsAccessMode.DriveLetterLegacy => $"Unmapping drive letter {driveLetter}:...",
+                _ => "Removing Windows access..."
+            });
+
+            Result unmappingResult = await _windowsAccessService.RemoveAccessAsync(
+                new WindowsAccessInfo
+                {
+                    AccessMode = accessMode,
+                    AccessPathUNC = string.Empty,
+                    DriveLetter = driveLetter,
+                    NetworkLocationName = networkLocationName
+                },
+                cancellationToken);
+
+            if (unmappingResult.IsFailure)
+            {
+                progress?.Report($"Windows access removal failed: {unmappingResult.ErrorMessage}");
                 unmappingFailed = true;
                 unmappingError = unmappingResult.ErrorMessage;
-                // Continue anyway - we still want to try unmounting from WSL
             }
             else
             {
-                progress?.Report($"Drive letter {driveLetter}: unmapped successfully");
-                unmappedDriveLetter = driveLetter.Value.ToString();
+                if (driveLetter.HasValue)
+                {
+                    unmappedDriveLetter = driveLetter.Value.ToString();
+                }
+
+                progress?.Report(accessMode switch
+                {
+                    WindowsAccessMode.NetworkLocation => $"Network Location '{networkLocationName}' removed successfully.",
+                    WindowsAccessMode.DriveLetterLegacy => $"Drive letter {driveLetter}: unmapped successfully.",
+                    _ => "Windows access removed."
+                });
             }
         }
 
@@ -112,6 +146,9 @@ public class UnmountOrchestrator : IUnmountOrchestrator
                     diskIndex,
                     unmountResult.ErrorMessage ?? "Unknown error during unmount",
                     "unmount");
+                failureResult.AccessMode = accessMode;
+                failureResult.DriveLetter = driveLetter;
+                failureResult.NetworkLocationName = networkLocationName;
 
                 // Log failure to history (best-effort)
                 await LogToHistoryAsync(failureResult, cancellationToken);
@@ -130,14 +167,20 @@ public class UnmountOrchestrator : IUnmountOrchestrator
             // Treat as overall failure since the workflow didn't complete fully
             result = UnmountAndUnmapResult.CreateFailure(
                 diskIndex,
-                unmappingError ?? "Drive unmapping failed",
+                unmappingError ?? "Windows access removal failed",
                 "unmap");
+            result.AccessMode = accessMode;
+            result.DriveLetter = driveLetter;
+            result.NetworkLocationName = networkLocationName;
         }
         else
         {
             // Complete success
-            result = UnmountAndUnmapResult.CreateSuccess(diskIndex,
-                string.IsNullOrEmpty(unmappedDriveLetter) ? null : unmappedDriveLetter[0]);
+            result = UnmountAndUnmapResult.CreateSuccess(
+                diskIndex,
+                accessMode,
+                string.IsNullOrEmpty(unmappedDriveLetter) ? null : unmappedDriveLetter[0],
+                networkLocationName);
         }
 
         // Log to history (best-effort)

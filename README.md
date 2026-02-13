@@ -1,133 +1,100 @@
 # LiMount
 
-**LiMount** is a Windows desktop application that simplifies mounting Linux disk partitions into WSL2 and mapping them as Windows drive letters. Built with C# WinUI 3 (.NET 10) and PowerShell, LiMount provides a clean, modern GUI for managing WSL disk mounts.
+**LiMount** is a Windows desktop application that mounts Linux disk partitions into WSL2 and exposes them in Windows Explorer.  
+Windows access is now **mode-based**:
+- `NetworkLocation` (default): creates an Explorer Network Location under NetHood.
+- `DriveLetterLegacy`: maps UNC to a Windows drive letter.
+- `None`: mount-only, with no Windows integration.
+
+Built with C# WinUI 3 (.NET 10) and PowerShell.
 
 ## Features
 
-- **Disk Enumeration**: Automatically detects physical disks and partitions using WMI
-- **Smart Filtering**: Identifies and filters likely Linux partitions (ext4, xfs, btrfs, etc.)
-- **Safety Checks**: Prevents mounting system or boot disks
-- **WSL2 Integration**: Uses `wsl --mount` to mount Linux partitions
-- **Drive Mapping**: Maps WSL UNC paths to Windows drive letters for easy access
-- **Modern UI**: Clean, intuitive WinUI 3 interface with real-time status updates
-- **Explorer Integration**: Opens mounted drives directly in Windows Explorer
+- **Disk Enumeration**: Detects physical disks and partitions using WMI
+- **Smart Filtering**: Prioritizes likely Linux partitions (ext4, xfs, btrfs, etc.)
+- **Safety Checks**: Blocks system/boot disks from mount workflows
+- **WSL2 Integration**: Uses `wsl --mount` for Linux filesystem mounting
+- **Windows Access Modes**:
+  - `NetworkLocation` (default)
+  - `DriveLetterLegacy` (explicit legacy mode)
+  - `None` (no Windows-side access surface)
+- **Explorer Integration**: Opens mounted paths directly in Explorer (mode-aware)
+- **Deterministic UI Tests**: FlaUI automation with optional screenshot artifact capture
 
 ## Requirements
 
 ### System Requirements
 
 - **Operating System**: Windows 10 (Build 19041+) or Windows 11 (Build 22000+ recommended)
-- **WSL**: Windows Subsystem for Linux 2 (WSL2) installed and configured
+- **WSL**: WSL2 installed and configured
   - Requires `wsl --mount` support (Windows 11 Build 22000+ or Microsoft Store WSL)
 - **PowerShell**: Windows PowerShell 5.1 or later
-- **Privileges**: Administrator access (for mounting disks)
+- **Privileges**: Administrator access (for mount/unmount scripts)
 
 ### Development Requirements
 
-- **.NET SDK 10.0.101+**: `global.json` pins to 10.0.101 with `rollForward: latestPatch`
-- **Visual Studio 2022** or **Visual Studio Code** (optional, for development)
+- **.NET SDK 10.0.101+** (`global.json` pins 10.0.101 with `rollForward: latestPatch`)
+- **Visual Studio 2022** or **Visual Studio Code** (optional)
 
 ## Project Structure
 
 ```text
 limount/
-├── LiMount.sln                      # Solution file
-├── LiMount.Core/                    # Core library (.NET 8)
-│   ├── Interfaces/                 # Service interfaces
-│   │   ├── IDiskEnumerationService.cs
-│   │   ├── IDriveLetterService.cs
+├── LiMount.sln
+├── LiMount.Core/
+│   ├── Interfaces/
 │   │   ├── IMountOrchestrator.cs
-│   │   ├── IScriptExecutor.cs
-│   │   └── IUnmountOrchestrator.cs
-│   ├── Models/                      # Data models
-│   │   ├── DiskInfo.cs
-│   │   ├── PartitionInfo.cs
-│   │   ├── DriveLetterInfo.cs
-│   │   ├── MountResult.cs
-│   │   ├── MappingResult.cs
+│   │   ├── IUnmountOrchestrator.cs
+│   │   ├── IWindowsAccessService.cs
+│   │   └── ...
+│   ├── Models/
+│   │   ├── ActiveMount.cs
 │   │   ├── MountAndMapResult.cs
-│   │   ├── UnmountResult.cs
-│   │   ├── UnmappingResult.cs
-│   │   └── UnmountAndUnmapResult.cs
-│   └── Services/                    # Business logic services
-│       ├── DiskEnumerationService.cs
-│       ├── DriveLetterService.cs
-│       ├── KeyValueOutputParser.cs
-│       ├── ScriptExecutor.cs
+│   │   ├── UnmountAndUnmapResult.cs
+│   │   ├── MountHistoryEntry.cs
+│   │   ├── WindowsAccessRequest.cs
+│   │   ├── WindowsAccessInfo.cs
+│   │   └── ...
+│   └── Services/
 │       ├── MountOrchestrator.cs
-│       └── UnmountOrchestrator.cs
-├── LiMount.WinUI/                   # WinUI 3 application (.NET 10)
-│   ├── ViewModels/                  # MVVM ViewModels
-│   │   └── MainViewModel.cs
-│   ├── Views/                       # UI views
-│   │   ├── MainPage.xaml
-│   │   └── HistoryPage.xaml
-│   ├── Services/                    # Platform-specific services
-│   ├── Converters/                  # Value converters
-│   ├── App.xaml
+│       ├── UnmountOrchestrator.cs
+│       ├── MountStateService.cs
+│       ├── Access/WindowsAccessService.cs
+│       └── ...
+├── LiMount.WinUI/
+│   ├── ViewModels/
+│   ├── Views/
+│   ├── TestMode/
 │   └── App.xaml.cs
-└── scripts/                         # PowerShell helper scripts
-    ├── Mount-LinuxDiskCore.ps1      # Elevated: WSL mount script
-    ├── Map-WSLShareToDrive.ps1      # Non-elevated: Drive mapping script
-    ├── Unmount-LinuxDisk.ps1        # Elevated: WSL unmount script
-    └── Unmap-DriveLetter.ps1        # Non-elevated: Drive unmapping script
+├── LiMount.Tests/
+├── LiMount.UITests/
+└── scripts/
+    ├── Mount-LinuxDiskCore.ps1
+    ├── Unmount-LinuxDisk.ps1
+    ├── Map-WSLShareToDrive.ps1
+    ├── Unmap-DriveLetter.ps1
+    └── network/
+        ├── Create-NetworkLocation.ps1
+        └── Remove-NetworkLocation.ps1
 ```
 
-## Building the Application
+## Build and Run
 
-### Prerequisites
-
-1. Install [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
-2. Ensure WSL2 is installed and configured on your Windows system
-
-### Build Steps
-
-1. **Clone or download this repository**
-   ```bash
-   git clone <repository-url>
-   cd limount
-   ```
-
-2. **Restore NuGet packages**
-   ```bash
-   dotnet restore
-   ```
-
-3. **Build the solution**
-   ```bash
-   dotnet build --configuration Release
-   ```
-
-4. **Run the application**
-   ```bash
-   dotnet run --project LiMount.WinUI
-   ```
-
-   Or navigate to the build output:
-   ```bash
-   cd LiMount.WinUI/bin/x64/Release/net10.0-windows10.0.26100.0/win-x64
-   ./LiMount.WinUI.exe
-   ```
-
-### Publish
-
-```bash
-.\build-release.ps1
+```powershell
+dotnet restore
+dotnet build --configuration Release
+dotnet run --project LiMount.WinUI
 ```
-
-Output: `LiMount.WinUI/bin/publish/win-x64/LiMount.WinUI.exe`
 
 ## Automated Testing
 
 ### Unit and service tests
 
-```bash
+```powershell
 dotnet test LiMount.Tests
 ```
 
 ### Deterministic UI automation (FlaUI + test mode)
-
-LiMount includes an app test mode that replaces live WSL/disk services with deterministic fakes.
 
 ```powershell
 $env:LIMOUNT_RUN_UI_TESTS='1'
@@ -135,7 +102,7 @@ dotnet test LiMount.UITests
 Remove-Item Env:\LIMOUNT_RUN_UI_TESTS
 ```
 
-Optional visual artifact capture during UI tests:
+Optional screenshot capture:
 
 ```powershell
 $env:LIMOUNT_RUN_UI_TESTS='1'
@@ -145,238 +112,150 @@ Remove-Item Env:\LIMOUNT_RUN_UI_TESTS
 Remove-Item Env:\LIMOUNT_CAPTURE_SCREENSHOT
 ```
 
-### Hardware-in-loop mount regression test (real WSL + disk)
+Full deterministic screenshot batch:
 
-Use this only on a machine with admin privileges and an explicitly chosen test disk/partition:
+```powershell
+$env:LIMOUNT_RUN_UI_TESTS='1'
+$env:LIMOUNT_CAPTURE_SCREENSHOT_BATCH='1'
+dotnet test LiMount.UITests --filter "FullyQualifiedName~ScreenshotBatchUiTests"
+Remove-Item Env:\LIMOUNT_RUN_UI_TESTS
+Remove-Item Env:\LIMOUNT_CAPTURE_SCREENSHOT_BATCH
+```
+
+Batch output:
+- `screenshots\ui-batch\<yyyyMMdd-HHmmss>\`
+- Deterministic files `01-main-initial.png` through `12-main-after-wizard.png`
+
+### Hardware-in-loop mount regression (real WSL + disk)
+
+Expected-failure validation (unsupported XFS feature cases):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\run-hil-mount-test.ps1 -DiskIndex 1 -Partition 2 -ExpectXfsUnsupported
 ```
 
-Drive-level verification (expected failure on one partition + required successful mount/unmount on another):
+Drive-level end-to-end validation (failure partition + success partition):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\run-hil-mount-test.ps1 -DiskIndex 1 -VerifyDriveEndToEnd -FailurePartition 2
 ```
 
-Notes:
-- The HIL runner sets `LIMOUNT_REQUIRE_HIL=1` so tests fail instead of silently skipping.
-- Default behavior validates the normal elevated script path (`LIMOUNT_SKIP_SCRIPT_ELEVATION=0`).
-- Use `-SkipScriptElevation` only in environments where direct non-elevated `wsl --mount` is allowed.
-
 ## Usage
 
 ### Basic Workflow
 
-1. **Launch LiMount**
-   - Run `LiMount.WinUI.exe`
-   - The application will enumerate available disks and partitions
+1. Launch LiMount and refresh disks.
+2. Select a non-system disk and Linux partition.
+3. Select filesystem type.
+4. Choose Windows access mode:
+   - `NetworkLocation` (default, no drive letter required)
+   - `DriveLetterLegacy` (requires drive letter)
+   - `None` (mount-only)
+5. Click **Mount** and approve elevation.
+6. Use **Open in Explorer**:
+   - `NetworkLocation`: opens UNC/network location target
+   - `DriveLetterLegacy`: opens `<DriveLetter>:\`
+   - `None`: Explorer action is disabled
+7. Click **Unmount** to clean up WSL and Windows access artifacts.
 
-2. **Select Disk**
-   - Choose a physical disk from the dropdown
-   - Only non-system, non-boot disks are shown for safety
-
-3. **Select Partition**
-   - Choose a partition (filtered to show likely Linux partitions)
-   - Partitions without Windows drive letters are prioritized
-
-4. **Select Drive Letter**
-   - Choose an available drive letter (sorted Z→A by default)
-
-5. **Select Filesystem Type**
-   - Choose the filesystem type (ext4, xfs, btrfs, vfat)
-   - Default: ext4
-
-6. **Mount**
-   - Click the **Mount** button
-   - You'll be prompted for Administrator elevation (UAC)
-   - The app will:
-     1. Mount the disk partition in WSL2
-     2. Detect the mount path (e.g., `/mnt/wsl/PHYSICALDRIVE2p1`)
-     3. Map the WSL UNC path to your selected drive letter
-   - Status updates will appear in the Status section
-
-7. **Access Your Drive**
-   - Click **Open in Explorer** to browse the mounted drive
-   - Or access it directly via `<DriveLetter>:\` in File Explorer
-
-## PowerShell Scripts
+## PowerShell Script Contracts
 
 ### Mount-LinuxDiskCore.ps1 (Elevated)
 
-**Purpose**: Mounts a physical disk partition into WSL2 using `wsl --mount`.
+Mounts a physical disk partition into WSL2 (`wsl --mount`) and returns key-value output including:
+- `STATUS`
+- `DistroName`
+- `MountPathLinux`
+- `MountPathUNC`
+- `AlreadyMounted`
+- `UncVerified`
+- Optional diagnostics (`ErrorCode`, `ErrorHint`, `DmesgSummary`)
 
-**Parameters**:
-- `DiskIndex` (required): Physical disk index (e.g., 2 for `\\.\PHYSICALDRIVE2`)
-- `Partition` (required): Partition number (1-based)
-- `FsType` (optional): Filesystem type (ext4, xfs, btrfs, vfat). Default: ext4
-- `DistroName` (optional): Specific WSL distribution name
+### Create-NetworkLocation.ps1 (Non-Elevated)
 
-**Output**: Machine-readable key=value pairs:
-```text
-STATUS=OK
-DistroName=Ubuntu
-MountPathLinux=/mnt/wsl/PHYSICALDRIVE2p1
-MountPathUNC=\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE2p1
-AlreadyMounted=false
-UncVerified=true
-```
+Creates an Explorer Network Location under:
+- `%AppData%\Microsoft\Windows\Network Shortcuts\<Name>\`
 
-Failure output may include:
-```text
-STATUS=ERROR
-ErrorMessage=...
-ErrorCode=XFS_UNSUPPORTED_FEATURES
-ErrorHint=This XFS filesystem uses features unsupported by the current WSL kernel...
-DmesgSummary=...
-```
+Output keys:
+- `STATUS`
+- `NetworkLocationName`
+- `NetworkLocationPath`
+- `TargetUNC`
 
-**Example**:
-```powershell
-.\Mount-LinuxDiskCore.ps1 -DiskIndex 2 -Partition 1 -FsType ext4
-```
+### Remove-NetworkLocation.ps1 (Non-Elevated)
 
-### Map-WSLShareToDrive.ps1 (Non-Elevated)
+Removes the Network Location folder created under NetHood.
 
-**Purpose**: Maps a WSL UNC path to a Windows drive letter.
+Output keys:
+- `STATUS`
+- `NetworkLocationName`
 
-**Parameters**:
-- `DriveLetter` (required): Drive letter to map (e.g., "L" or "L:")
-- `TargetUNC` (required): UNC path to map (e.g., `\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE2p1`)
+### Map-WSLShareToDrive.ps1 / Unmap-DriveLetter.ps1 (Non-Elevated, legacy mode)
 
-**Output**: Machine-readable key=value pairs:
-```text
-STATUS=OK
-DriveLetter=L
-MappedTo=\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE2p1
-```
+Used only when `DriveLetterLegacy` is selected.
 
-**Example**:
-```powershell
-.\Map-WSLShareToDrive.ps1 -DriveLetter L -TargetUNC "\\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE2p1"
-```
+## Architecture Notes
 
-## Architecture
-
-### Technologies Used
-
-- **C# / .NET 10**: Core language and runtime
-  - **Target Framework**: `net10.0-windows10.0.26100.0` (Windows 11)
-  - LiMount.Core targets `net8.0-windows`, LiMount.WinUI targets .NET 10
-- **WinUI 3**: Modern Windows UI framework (Windows App SDK)
-- **CommunityToolkit.Mvvm**: MVVM helpers (RelayCommand, ObservableProperty)
-- **System.Management**: WMI access for disk enumeration (Windows-only)
-- **PowerShell**: Helper scripts for WSL mounting and drive mapping
-- **Platform Attributes**: `[SupportedOSPlatform("windows")]` for Windows-specific services
-
-### Design Patterns
-
-- **MVVM (Model-View-ViewModel)**: Separation of UI and business logic
-- **Service Layer**: Encapsulated business logic in `LiMount.Core.Services`
-- **Key-Value Parsing**: Machine-readable output from PowerShell scripts
-
-### Key Components
-
-1. **DiskEnumerationService** (Windows-only): Uses WMI (`Win32_DiskDrive`, `Win32_DiskPartition`, `Win32_LogicalDisk`) to enumerate disks and partitions, with heuristics to identify Linux filesystems. Marked with `[SupportedOSPlatform("windows")]` attribute.
-
-2. **DriveLetterService** (Windows-only): Enumerates used and free Windows drive letters using `DriveInfo.GetDrives()`. Manages A-Z drive letter mappings specific to Windows.
-
-3. **KeyValueOutputParser**: Parses `key=value` output from PowerShell scripts into dictionaries
-
-4. **MainViewModel**: Orchestrates the entire mount workflow, including:
-   - Disk and partition selection
-   - Elevated PowerShell script execution
-   - Drive letter mapping
-   - Status updates and error handling
+- **Orchestrator contracts are access-mode-first** (`IMountOrchestrator`, `IUnmountOrchestrator`).
+- **`IWindowsAccessService`** routes Windows integration by mode:
+  - `NetworkLocation` -> NetHood scripts
+  - `DriveLetterLegacy` -> drive mapping scripts
+  - `None` -> no-op
+- **State and history are mode-aware**:
+  - `ActiveMount` tracks `AccessMode`, optional `DriveLetter`, optional `NetworkLocationName`
+  - History/result models persist access metadata for restore and diagnostics
+- **Mount state reconciliation is mode-specific**:
+  - Drive-letter pruning applies to `DriveLetterLegacy` only
+  - `NetworkLocation`/`None` entries are not pruned for missing drive letters
 
 ## Known Limitations
 
-This is an MVP/prototype with the following limitations:
-
-- **Single Distro Support**: Auto-detects the first WSL distro; multi-distro scenarios may need manual specification
-- **Windows 11 Preferred**: `wsl --mount` works best on Windows 11 Build 22000+; older builds may have limited support
-- **Kernel Compatibility Limits**: Some XFS/ext* feature sets may still be unsupported by the installed WSL kernel
-- **No VM Fallback Yet**: Native Linux VM fallback for unsupported filesystems is not yet implemented
+- **Single active mount UX**: state can track multiple records, but main UI still presents a single active mount workflow.
+- **Windows 11 preferred**: `wsl --mount` reliability/features are best on modern builds.
+- **Kernel compatibility limits**: some XFS/ext feature sets may still be unsupported by the installed WSL kernel.
+- **No VM fallback yet**: unsupported filesystem fallback to a Linux VM remains planned work.
 
 ## Troubleshooting
 
-### "wsl --mount is not supported"
+### "`wsl --mount` is not supported"
 
-- Ensure you're running Windows 11 Build 22000+ or have the Microsoft Store version of WSL installed
-- Update WSL: `wsl --update`
+- Use Windows 11 Build 22000+ or Microsoft Store WSL.
+- Run `wsl --update`.
 
-### "wsl --mount failed (exit code 1): Invalid argument" on XFS
+### XFS mount fails with `Invalid argument`
 
-Some XFS filesystems use feature flags newer than the currently installed WSL kernel supports. In this case LiMount now surfaces an actionable diagnostic (`XFS_UNSUPPORTED_FEATURES`) with guidance to update the WSL kernel or mount from native Linux.
+Check WSL kernel logs:
 
-Validate kernel support from WSL:
-
-```bash
+```powershell
 wsl -e sh -lc "dmesg | tail -n 200"
 ```
 
-If you see messages similar to:
-- `XFS ... Superblock has unknown incompatible features`
-- `Filesystem cannot be safely mounted by this kernel`
+If you see unknown incompatible filesystem features, this is a kernel/filesystem compatibility issue.
 
-then this is a kernel/filesystem compatibility limitation, not a drive-letter mapping bug.
+### Network Location not visible immediately
 
-### "Disk X is a system or boot disk"
+- Refresh Explorer (`F5`).
+- Confirm NetHood path exists:
+  - `%AppData%\Microsoft\Windows\Network Shortcuts`
+- Verify UNC is reachable:
+  - `Test-Path \\wsl.localhost\<Distro>\mnt\wsl\PHYSICALDRIVEXpY`
 
-- LiMount refuses to mount system/boot disks for safety
-- Only select secondary/external disks
+### Legacy drive letter issues
 
-### "UNC path is not reachable"
+- Legacy mode only: verify `subst` mappings:
+  - `subst`
+- Choose another free drive letter if conflict exists.
 
-- Ensure WSL2 is running: `wsl --list --verbose`
-- Verify the mount succeeded: `wsl -- ls /mnt/wsl`
-- Check network sharing is enabled for WSL
+### None mode cannot open Explorer
 
-### Drive letter not appearing in Explorer
-
-- Refresh Explorer (F5)
-- Try a different drive letter
-- Verify `subst` mapping in the current user context: `subst`
-- Verify UNC accessibility directly: `Test-Path \\wsl.localhost\<Distro>\mnt\wsl\PHYSICALDRIVEXpY`
-
-### App says a disk is mounted, but unmount fails with `ERROR_FILE_NOT_FOUND`
-
-LiMount now treats WSL detach-file-not-found responses as an already-detached success path during unmount cleanup. If this appears in older builds, upgrade and retry.
-
-### App detects mount state incorrectly after a failed mount attempt
-
-LiMount now checks the live WSL mount table (`mount`) instead of relying on directory listing under `/mnt/wsl`, and it attempts best-effort cleanup of stale `PHYSICALDRIVE*p*` directories.
-
-For full incident details and validation evidence, see `docs/incidents/2026-02-11-wsl-xfs-mount-regression.md`.
-
-## Contributing
-
-This is a prototype/MVP project. Contributions are welcome! Areas for improvement:
-
-- **Enhanced Unmount Feature**: Improve UI and reliability for unmount and unmap operations
-- **Multi-Distro Support**: Allow selecting which WSL distro to use
-- **Persistent Mappings**: Option to persist drive mappings across reboots
-- **Better Error Handling**: More robust error recovery and user guidance
-- **Unit Tests**: Expand test coverage for services and utilities
-- **Logging**: Add detailed logging for troubleshooting
-
-## License
-
-[Specify your license here, e.g., MIT, Apache 2.0, etc.]
-
-## Acknowledgments
-
-- **Microsoft WSL Team**: For `wsl --mount` functionality
-- **CommunityToolkit.Mvvm**: For excellent MVVM helpers
-- **.NET Team**: For .NET 10 and WinUI 3
+Expected behavior: `None` intentionally performs no Windows integration surface creation.
 
 ## References
 
 - [WSL2 Disk Mounting Documentation](https://learn.microsoft.com/en-us/windows/wsl/wsl2-mount-disk)
 - [WinUI 3 Documentation](https://learn.microsoft.com/en-us/windows/apps/winui/winui3/)
-- [Win32_DiskDrive WMI Class](https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-diskdrive)
-- [ProcessStartInfo Documentation](https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.processstartinfo)
+- [Windows Network Shortcuts (NetHood) behavior](https://superuser.com/questions/1781239/how-can-i-create-a-shortcut-in-this-pc-on-windows-10)
 
 ---
 
-**Built with ❤️ for the WSL community**
+Built for the WSL community.

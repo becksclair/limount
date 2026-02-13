@@ -62,10 +62,9 @@ public partial class MainViewModel(
     }
 
     /// <inheritdoc/>
-    protected override void OpenExplorerCore(char driveLetter)
+    protected override void OpenExplorerCore(string path)
     {
-        var drivePath = $"{driveLetter}:\\";
-        Process.Start(new ProcessStartInfo("explorer.exe", drivePath) { UseShellExecute = true });
+        Process.Start(new ProcessStartInfo("explorer.exe", path) { UseShellExecute = true });
     }
 
     /// <inheritdoc/>

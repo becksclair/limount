@@ -286,7 +286,7 @@ public class MountStateServiceTests : IDisposable
         // Assert
         var mounts = await _service.GetActiveMountsAsync();
         mounts.Should().HaveCount(3);
-        mounts.Select(m => m.DriveLetter).Should().Contain(new[] { 'Z', 'Y', 'X' });
+        mounts.Select(m => m.DriveLetter).Should().Contain(new char?[] { 'Z', 'Y', 'X' });
     }
 
     [Fact]
@@ -427,6 +427,7 @@ public class MountStateServiceTests : IDisposable
         var mount = new ActiveMount
         {
             DiskIndex = 21,
+            AccessMode = WindowsAccessMode.DriveLetterLegacy,
             DriveLetter = 'Q'
         };
 
@@ -462,6 +463,7 @@ public class MountStateServiceTests : IDisposable
                 Id = "mount-1",
                 DiskIndex = 42,
                 PartitionNumber = 1,
+                AccessMode = WindowsAccessMode.DriveLetterLegacy,
                 DriveLetter = 'Z',
                 MountPathUNC = accessibleDir
             },
@@ -470,6 +472,7 @@ public class MountStateServiceTests : IDisposable
                 Id = "mount-2",
                 DiskIndex = 42,
                 PartitionNumber = 2,
+                AccessMode = WindowsAccessMode.DriveLetterLegacy,
                 DriveLetter = 'Y',
                 MountPathUNC = inaccessibleDir
             },
@@ -478,6 +481,7 @@ public class MountStateServiceTests : IDisposable
                 Id = "orphan",
                 DiskIndex = 43,
                 PartitionNumber = 1,
+                AccessMode = WindowsAccessMode.DriveLetterLegacy,
                 DriveLetter = 'X'
             }
         };

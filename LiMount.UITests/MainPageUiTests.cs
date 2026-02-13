@@ -185,12 +185,16 @@ public class MainPageUiTests
             CompleteSetupWizardIfPresent(window);
 
             WaitForComboToHaveItems(window, DiskComboBoxId, "disk");
-            WaitForComboToHaveItems(window, DriveLetterComboBoxId, "drive letter");
 
             SelectFirstComboItem(window, DiskComboBoxId, "disk");
             WaitForComboToHaveItems(window, PartitionComboBoxId, "partition");
             SelectFirstComboItem(window, PartitionComboBoxId, "partition");
-            SelectFirstComboItem(window, DriveLetterComboBoxId, "drive letter");
+
+            if (TryGetVisibleComboBox(window, DriveLetterComboBoxId, out _))
+            {
+                WaitForComboToHaveItems(window, DriveLetterComboBoxId, "drive letter");
+                SelectFirstComboItem(window, DriveLetterComboBoxId, "drive letter");
+            }
 
             var mountButton = GetButton(window, MountButtonId);
             Retry.WhileTrue(
@@ -246,6 +250,17 @@ public class MainPageUiTests
     {
         return window.FindFirstDescendant(cf => cf.ByAutomationId(automationId))?.AsComboBox()
             ?? throw new InvalidOperationException($"ComboBox '{automationId}' was not found.");
+    }
+
+    private static bool TryGetVisibleComboBox(Window window, string automationId, out ComboBox? comboBox)
+    {
+        comboBox = window.FindFirstDescendant(cf => cf.ByAutomationId(automationId))?.AsComboBox();
+        if (comboBox == null)
+        {
+            return false;
+        }
+
+        return !comboBox.IsOffscreen;
     }
 
     private static void WaitForComboToHaveItems(Window window, string automationId, string displayName)

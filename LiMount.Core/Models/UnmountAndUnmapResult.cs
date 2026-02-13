@@ -21,9 +21,19 @@ public class UnmountAndUnmapResult
     public int DiskIndex { get; set; }
 
     /// <summary>
-    /// The drive letter that was unmapped (if any).
+    /// The drive letter that was unmapped in legacy mode (if any).
     /// </summary>
     public char? DriveLetter { get; set; }
+
+    /// <summary>
+    /// Access mode involved in the unmount operation.
+    /// </summary>
+    public WindowsAccessMode AccessMode { get; set; }
+
+    /// <summary>
+    /// Network location name that was removed in network-location mode.
+    /// </summary>
+    public string? NetworkLocationName { get; set; }
 
     /// <summary>
     /// Error message if the workflow failed.
@@ -48,13 +58,17 @@ public class UnmountAndUnmapResult
     /// <returns>An UnmountAndUnmapResult marked as successful with the provided disk index and optional drive letter.</returns>
     public static UnmountAndUnmapResult CreateSuccess(
         int diskIndex,
-        char? driveLetter = null)
+        WindowsAccessMode accessMode,
+        char? driveLetter = null,
+        string? networkLocationName = null)
     {
         return new UnmountAndUnmapResult
         {
             Success = true,
             DiskIndex = diskIndex,
-            DriveLetter = driveLetter
+            AccessMode = accessMode,
+            DriveLetter = driveLetter,
+            NetworkLocationName = networkLocationName
         };
     }
 

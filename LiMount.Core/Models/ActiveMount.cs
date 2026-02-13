@@ -27,9 +27,19 @@ public class ActiveMount
     public int PartitionNumber { get; set; }
 
     /// <summary>
-    /// Windows drive letter mapped to this mount.
+    /// Windows drive letter mapped to this mount when using legacy drive mapping mode.
     /// </summary>
-    public char DriveLetter { get; set; }
+    public char? DriveLetter { get; set; }
+
+    /// <summary>
+    /// Windows access mode used for this mount.
+    /// </summary>
+    public WindowsAccessMode AccessMode { get; set; } = WindowsAccessMode.NetworkLocation;
+
+    /// <summary>
+    /// Explorer Network Location name when using network location mode.
+    /// </summary>
+    public string? NetworkLocationName { get; set; }
 
     /// <summary>
     /// WSL distro name used for the mount.

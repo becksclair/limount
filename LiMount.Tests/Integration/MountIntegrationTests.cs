@@ -3,7 +3,9 @@ using System.Threading;
 using FluentAssertions;
 using LiMount.Core.Configuration;
 using LiMount.Core.Interfaces;
+using LiMount.Core.Models;
 using LiMount.Core.Services;
+using LiMount.Core.Services.Access;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -26,6 +28,7 @@ public class MountIntegrationTests : IAsyncLifetime
     private readonly DiskEnumerationService _diskService;
     private readonly MountOrchestrator _mountOrchestrator;
     private readonly UnmountOrchestrator _unmountOrchestrator;
+    private readonly IWindowsAccessService _windowsAccessService;
     private readonly IMountHistoryService _historyService;
     private readonly int? _testDiskIndex;
     private readonly int _testPartition;
@@ -50,15 +53,19 @@ public class MountIntegrationTests : IAsyncLifetime
             loggerFactory.CreateLogger<MountHistoryService>(),
             config);
 
+        _windowsAccessService = new WindowsAccessService(
+            _scriptExecutor,
+            loggerFactory.CreateLogger<WindowsAccessService>());
+
         _mountOrchestrator = new MountOrchestrator(
             _scriptExecutor, // IMountScriptService
-            _scriptExecutor, // IDriveMappingService
+            _windowsAccessService,
             config,
             _historyService);
 
         _unmountOrchestrator = new UnmountOrchestrator(
             _scriptExecutor, // IMountScriptService
-            _scriptExecutor, // IDriveMappingService
+            _windowsAccessService,
             _historyService);
 
         // Get test disk from environment variable or auto-detect
@@ -132,9 +139,7 @@ public class MountIntegrationTests : IAsyncLifetime
         {
             try
             {
-                await _unmountOrchestrator.UnmountAndUnmapAsync(
-                    _testDiskIndex.Value,
-                    _mappedDriveLetter.Value);
+                await _unmountOrchestrator.UnmountAndUnmapAsync(_testDiskIndex.Value, WindowsAccessMode.DriveLetterLegacy, _mappedDriveLetter.Value);
             }
             catch
             {
@@ -242,10 +247,7 @@ public class MountIntegrationTests : IAsyncLifetime
         // Step 2: Mount and map
         Console.WriteLine("Mounting...");
         var progress = new Progress<string>(msg => Console.WriteLine($"  {msg}"));
-        var result = await _mountOrchestrator.MountAndMapAsync(
-            _testDiskIndex!.Value,
-            _testPartition,
-            freeLetter,
+        var result = await _mountOrchestrator.MountAndMapAsync(_testDiskIndex!.Value, _testPartition, WindowsAccessMode.DriveLetterLegacy, freeLetter,
             "auto",
             null,
             progress);
@@ -304,9 +306,7 @@ public class MountIntegrationTests : IAsyncLifetime
 
         // Step 6: Unmount
         Console.WriteLine("Unmounting...");
-        var unmountResult = await _unmountOrchestrator.UnmountAndUnmapAsync(
-            _testDiskIndex!.Value,
-            freeLetter);
+        var unmountResult = await _unmountOrchestrator.UnmountAndUnmapAsync(_testDiskIndex!.Value, WindowsAccessMode.DriveLetterLegacy, freeLetter);
         unmountResult.Success.Should().BeTrue($"Unmount should succeed. Error: {unmountResult.ErrorMessage}");
 
         // Step 7: Verify UNC path is gone (WSL mount removed)

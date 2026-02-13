@@ -26,9 +26,19 @@ public class MountAndMapResult
     public int Partition { get; set; }
 
     /// <summary>
-    /// The drive letter that was mapped.
+    /// The drive letter that was mapped in legacy drive-letter mode.
     /// </summary>
     public char? DriveLetter { get; set; }
+
+    /// <summary>
+    /// Access mode used for the successful mount.
+    /// </summary>
+    public WindowsAccessMode AccessMode { get; set; }
+
+    /// <summary>
+    /// Explorer Network Location name when using network location mode.
+    /// </summary>
+    public string? NetworkLocationName { get; set; }
 
     /// <summary>
     /// The WSL distribution name where the disk was mounted.
@@ -73,17 +83,21 @@ public class MountAndMapResult
     public static MountAndMapResult CreateSuccess(
         int diskIndex,
         int partition,
-        char driveLetter,
+        WindowsAccessMode accessMode,
         string distroName,
         string mountPathLinux,
-        string mountPathUNC)
+        string mountPathUNC,
+        char? driveLetter = null,
+        string? networkLocationName = null)
     {
         return new MountAndMapResult
         {
             Success = true,
             DiskIndex = diskIndex,
             Partition = partition,
+            AccessMode = accessMode,
             DriveLetter = driveLetter,
+            NetworkLocationName = networkLocationName,
             DistroName = distroName,
             MountPathLinux = mountPathLinux,
             MountPathUNC = mountPathUNC

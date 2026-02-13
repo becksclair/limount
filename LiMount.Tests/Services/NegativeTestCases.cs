@@ -1,7 +1,9 @@
 using FluentAssertions;
 using Microsoft.Extensions.Options;
 using LiMount.Core.Configuration;
+using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
+using LiMount.Core.Results;
 using LiMount.Core.Services;
 
 namespace LiMount.Tests.Services;
@@ -185,22 +187,22 @@ public class NegativeTestCases : IDisposable
     public void MountOrchestrator_NullMountScriptService_ThrowsArgumentNullException()
     {
         // Arrange
-        var mockDriveMappingService = new TestDriveMappingService();
+        var windowsAccessService = new TestWindowsAccessService();
 
         // Act & Assert
-        var act = () => new MountOrchestrator(null!, mockDriveMappingService, _config);
+        var act = () => new MountOrchestrator(null!, windowsAccessService, _config);
         act.Should().Throw<ArgumentNullException>().WithParameterName("mountScriptService");
     }
 
     [Fact]
-    public void MountOrchestrator_NullDriveMappingService_ThrowsArgumentNullException()
+    public void MountOrchestrator_NullWindowsAccessService_ThrowsArgumentNullException()
     {
         // Arrange
         var mockMountScriptService = new TestMountScriptService();
 
         // Act & Assert
         var act = () => new MountOrchestrator(mockMountScriptService, null!, _config);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("driveMappingService");
+        act.Should().Throw<ArgumentNullException>().WithParameterName("windowsAccessService");
     }
 
     [Fact]
@@ -208,10 +210,10 @@ public class NegativeTestCases : IDisposable
     {
         // Arrange - use mock services
         var mockMountScriptService = new TestMountScriptService();
-        var mockDriveMappingService = new TestDriveMappingService();
+        var windowsAccessService = new TestWindowsAccessService();
 
         // Act & Assert
-        var act = () => new MountOrchestrator(mockMountScriptService, mockDriveMappingService, null!);
+        var act = () => new MountOrchestrator(mockMountScriptService, windowsAccessService, null!);
         act.Should().Throw<ArgumentNullException>().WithParameterName("config");
     }
 
@@ -229,7 +231,7 @@ public class NegativeTestCases : IDisposable
         mount.Id.Should().NotBeNullOrEmpty();
         mount.DiskIndex.Should().Be(0);
         mount.PartitionNumber.Should().Be(0);
-        mount.DriveLetter.Should().Be(default(char));
+        mount.DriveLetter.Should().BeNull();
         mount.IsVerified.Should().BeFalse();
     }
 
@@ -262,15 +264,15 @@ public class NegativeTestCases : IDisposable
     }
 
     /// <summary>
-    /// Test implementation of IDriveMappingService for testing orchestrators.
+    /// Test implementation of IWindowsAccessService for testing orchestrators.
     /// </summary>
-    private class TestDriveMappingService : Core.Interfaces.IDriveMappingService
+    private class TestWindowsAccessService : IWindowsAccessService
     {
-        public Task<MappingResult> ExecuteMappingScriptAsync(char driveLetter, string targetUNC, CancellationToken cancellationToken = default)
-            => Task.FromResult(new MappingResult { Success = false });
+        public Task<Result<WindowsAccessInfo>> CreateAccessAsync(WindowsAccessRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(Result<WindowsAccessInfo>.Failure("Access creation failed"));
 
-        public Task<UnmappingResult> ExecuteUnmappingScriptAsync(char driveLetter, CancellationToken cancellationToken = default)
-            => Task.FromResult(new UnmappingResult { Success = false });
+        public Task<Result> RemoveAccessAsync(WindowsAccessInfo accessInfo, CancellationToken cancellationToken = default)
+            => Task.FromResult(Result.Failure("Access removal failed"));
     }
 
     /// <summary>

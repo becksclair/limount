@@ -79,7 +79,7 @@ public abstract partial class BaseMainViewModel : ObservableObject
     private bool _isDetectingFs;
 
     [ObservableProperty]
-    private string _statusMessage = "Ready. Select a disk, partition, and drive letter, then click Mount.";
+    private string _statusMessage = "Ready. Select a disk and partition, then click Mount.";
 
     [ObservableProperty]
     private bool _isBusy;
@@ -107,9 +107,38 @@ public abstract partial class BaseMainViewModel : ObservableObject
     private char? _currentMountedDriveLetter;
 
     /// <summary>
+    /// Selected Windows access mode for new mounts.
+    /// </summary>
+    [ObservableProperty]
+    private WindowsAccessMode _selectedAccessMode = WindowsAccessMode.NetworkLocation;
+
+    /// <summary>
+    /// Access mode used by the currently mounted partition.
+    /// </summary>
+    [ObservableProperty]
+    private WindowsAccessMode _currentMountedAccessMode = WindowsAccessMode.NetworkLocation;
+
+    /// <summary>
+    /// Network location name used by the current mount (network-location mode only).
+    /// </summary>
+    [ObservableProperty]
+    private string? _currentMountedNetworkLocationName;
+
+    /// <summary>
+    /// UNC path used by the current mount.
+    /// </summary>
+    [ObservableProperty]
+    private string? _currentMountedUncPath;
+
+    /// <summary>
     /// Gets whether a disk is currently mounted.
     /// </summary>
     public bool IsMounted => CurrentMountedDiskIndex.HasValue;
+
+    /// <summary>
+    /// Gets whether legacy drive-letter mode is selected for new mount operations.
+    /// </summary>
+    public bool IsDriveLetterMode => SelectedAccessMode == WindowsAccessMode.DriveLetterLegacy;
 
     #endregion
 
@@ -178,10 +207,10 @@ public abstract partial class BaseMainViewModel : ObservableObject
     protected abstract Task RunOnUiThreadAsync(Func<Task> action);
 
     /// <summary>
-    /// Opens Windows Explorer to the specified drive letter.
+    /// Opens Windows Explorer to the specified path.
     /// Platform-specific implementations may differ in process start options.
     /// </summary>
-    protected abstract void OpenExplorerCore(char driveLetter);
+    protected abstract void OpenExplorerCore(string path);
 
     /// <summary>
     /// Opens the history window.
@@ -217,6 +246,12 @@ public abstract partial class BaseMainViewModel : ObservableObject
         {
             MountCommand.NotifyCanExecuteChanged();
         }
+        else if (e.PropertyName == nameof(SelectedAccessMode))
+        {
+            OnPropertyChanged(nameof(IsDriveLetterMode));
+            MountCommand.NotifyCanExecuteChanged();
+            OpenExplorerCommand.NotifyCanExecuteChanged();
+        }
     }
 
     #endregion
@@ -231,6 +266,14 @@ public abstract partial class BaseMainViewModel : ObservableObject
         if (!string.IsNullOrEmpty(_detectedFsType))
             return _detectedFsType;
         return "auto";
+    }
+
+    /// <summary>
+    /// Applies user-selected Windows access mode to mount workflows.
+    /// </summary>
+    public void SetAccessMode(WindowsAccessMode accessMode)
+    {
+        SelectedAccessMode = accessMode;
     }
 
     /// <summary>
@@ -255,7 +298,7 @@ public abstract partial class BaseMainViewModel : ObservableObject
                !IsMounted &&
                SelectedDisk != null &&
                SelectedPartition != null &&
-               SelectedDriveLetter != null;
+               (!IsDriveLetterMode || SelectedDriveLetter != null);
     }
 
     private bool CanUnmount()
@@ -265,7 +308,22 @@ public abstract partial class BaseMainViewModel : ObservableObject
 
     private bool CanOpenExplorerExecute()
     {
-        return CanOpenExplorer && CurrentMountedDriveLetter.HasValue;
+        return CanOpenExplorer && !string.IsNullOrWhiteSpace(GetExplorerPath());
+    }
+
+    private string? GetExplorerPath()
+    {
+        if (CurrentMountedAccessMode == WindowsAccessMode.DriveLetterLegacy && CurrentMountedDriveLetter.HasValue)
+        {
+            return $"{CurrentMountedDriveLetter.Value}:\\";
+        }
+
+        if (CurrentMountedAccessMode == WindowsAccessMode.NetworkLocation && !string.IsNullOrWhiteSpace(CurrentMountedUncPath))
+        {
+            return CurrentMountedUncPath;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -330,7 +388,7 @@ public abstract partial class BaseMainViewModel : ObservableObject
             SelectedDisk = Disks[0];
         }
 
-        if (FreeDriveLetters.Count > 0 && SelectedDriveLetter == null)
+        if (IsDriveLetterMode && FreeDriveLetters.Count > 0 && SelectedDriveLetter == null)
         {
             SelectedDriveLetter = FreeDriveLetters[0];
         }
@@ -341,13 +399,15 @@ public abstract partial class BaseMainViewModel : ObservableObject
             return;
         }
 
-        if (FreeDriveLetters.Count == 0)
+        if (IsDriveLetterMode && FreeDriveLetters.Count == 0)
         {
             StatusMessage = "No free drive letters are available. Unmap a drive and click Refresh.";
             return;
         }
 
-        StatusMessage = $"Found {Disks.Count} candidate disk(s) and {FreeDriveLetters.Count} free drive letter(s).";
+        StatusMessage = IsDriveLetterMode
+            ? $"Found {Disks.Count} candidate disk(s) and {FreeDriveLetters.Count} free drive letter(s)."
+            : $"Found {Disks.Count} candidate disk(s). Access mode: {SelectedAccessMode}.";
     }
 
     /// <summary>
@@ -440,9 +500,11 @@ public abstract partial class BaseMainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanMount))]
     protected async Task MountAsync()
     {
-        if (SelectedDisk == null || SelectedPartition == null || SelectedDriveLetter == null)
+        if (SelectedDisk == null || SelectedPartition == null || (IsDriveLetterMode && SelectedDriveLetter == null))
         {
-            StatusMessage = "Please select a disk, partition, and drive letter.";
+            StatusMessage = IsDriveLetterMode
+                ? "Please select a disk, partition, and drive letter."
+                : "Please select a disk and partition.";
             return;
         }
 
@@ -456,7 +518,8 @@ public abstract partial class BaseMainViewModel : ObservableObject
             var result = await MountOrchestrator.MountAndMapAsync(
                 SelectedDisk.Index,
                 SelectedPartition.PartitionNumber,
-                SelectedDriveLetter.Value,
+                SelectedAccessMode,
+                SelectedDriveLetter,
                 GetFileSystemTypeForMount(),
                 null,
                 progress);
@@ -469,9 +532,11 @@ public abstract partial class BaseMainViewModel : ObservableObject
 
             CurrentMountedDiskIndex = SelectedDisk.Index;
             CurrentMountedPartition = SelectedPartition.PartitionNumber;
-            var driveLetter = result.DriveLetter ?? SelectedDriveLetter.Value;
-            CurrentMountedDriveLetter = driveLetter;
-            CanOpenExplorer = true;
+            CurrentMountedAccessMode = result.AccessMode;
+            CurrentMountedDriveLetter = result.DriveLetter;
+            CurrentMountedNetworkLocationName = result.NetworkLocationName;
+            CurrentMountedUncPath = result.MountPathUNC;
+            CanOpenExplorer = !string.IsNullOrWhiteSpace(GetExplorerPath());
 
             UnmountCommand.NotifyCanExecuteChanged();
             OpenExplorerCommand.NotifyCanExecuteChanged();
@@ -483,7 +548,9 @@ public abstract partial class BaseMainViewModel : ObservableObject
                 MountedAt = DateTime.UtcNow,
                 DiskIndex = result.DiskIndex,
                 PartitionNumber = result.Partition,
-                DriveLetter = driveLetter,
+                AccessMode = result.AccessMode,
+                DriveLetter = result.DriveLetter,
+                NetworkLocationName = result.NetworkLocationName,
                 DistroName = result.DistroName ?? string.Empty,
                 MountPathLinux = result.MountPathLinux ?? string.Empty,
                 MountPathUNC = result.MountPathUNC ?? string.Empty,
@@ -498,11 +565,11 @@ public abstract partial class BaseMainViewModel : ObservableObject
             catch (Exception ex)
             {
                 Logger.LogWarning(ex, "Failed to persist mount state for disk {DiskIndex} partition {Partition}", result.DiskIndex, result.Partition);
-                StatusMessage = $"Mounted as {SelectedDriveLetter}: - Warning: History not saved due to persistence error.";
+                StatusMessage = BuildMountSuccessMessage(result, withPersistenceWarning: true);
                 return;
             }
 
-            StatusMessage = $"Success! Mounted as {SelectedDriveLetter}: - You can now access the Linux partition from Windows Explorer.";
+            StatusMessage = BuildMountSuccessMessage(result, withPersistenceWarning: false);
         }
         catch (Exception ex)
         {
@@ -521,14 +588,15 @@ public abstract partial class BaseMainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanOpenExplorerExecute))]
     protected void OpenExplorer()
     {
-        if (!CurrentMountedDriveLetter.HasValue)
+        var explorerPath = GetExplorerPath();
+        if (string.IsNullOrWhiteSpace(explorerPath))
         {
             return;
         }
 
         try
         {
-            OpenExplorerCore(CurrentMountedDriveLetter.Value);
+            OpenExplorerCore(explorerPath);
         }
         catch (Exception ex)
         {
@@ -549,7 +617,7 @@ public abstract partial class BaseMainViewModel : ObservableObject
         }
 
         var confirmed = await DialogService.ConfirmAsync(
-            $"Are you sure you want to unmount disk {CurrentMountedDiskIndex} (Drive {CurrentMountedDriveLetter?.ToString() ?? "-"}:)?\n\n" +
+            $"Are you sure you want to unmount disk {CurrentMountedDiskIndex} ({DescribeCurrentAccessTarget()})?\n\n" +
             "Make sure you have saved and closed any files on this drive before unmounting.",
             "Confirm Unmount",
             DialogType.Warning);
@@ -568,7 +636,9 @@ public abstract partial class BaseMainViewModel : ObservableObject
 
             var unmountResult = await UnmountOrchestrator.UnmountAndUnmapAsync(
                 CurrentMountedDiskIndex.Value,
+                CurrentMountedAccessMode,
                 CurrentMountedDriveLetter,
+                CurrentMountedNetworkLocationName,
                 progress);
 
             if (!unmountResult.Success)
@@ -600,6 +670,9 @@ public abstract partial class BaseMainViewModel : ObservableObject
             CurrentMountedDiskIndex = null;
             CurrentMountedPartition = null;
             CurrentMountedDriveLetter = null;
+            CurrentMountedNetworkLocationName = null;
+            CurrentMountedUncPath = null;
+            CurrentMountedAccessMode = SelectedAccessMode;
             CanOpenExplorer = false;
             MountCommand.NotifyCanExecuteChanged();
         }
@@ -755,6 +828,30 @@ public abstract partial class BaseMainViewModel : ObservableObject
         StatusMessage = $"Found {Disks.Count} candidate disk(s). Ready to mount.";
     }
 
+    private static string BuildMountSuccessMessage(MountAndMapResult result, bool withPersistenceWarning)
+    {
+        var suffix = withPersistenceWarning
+            ? " Warning: History not saved due to persistence error."
+            : string.Empty;
+
+        return result.AccessMode switch
+        {
+            WindowsAccessMode.DriveLetterLegacy => $"Success! Mounted as {result.DriveLetter}: - You can now access the Linux partition from Windows Explorer.{suffix}",
+            WindowsAccessMode.NetworkLocation => $"Success! Network Location '{result.NetworkLocationName}' created for {result.MountPathUNC}.{suffix}",
+            _ => $"Success! Mounted without Windows integration (None mode). UNC path: {result.MountPathUNC}.{suffix}"
+        };
+    }
+
+    private string DescribeCurrentAccessTarget()
+    {
+        return CurrentMountedAccessMode switch
+        {
+            WindowsAccessMode.DriveLetterLegacy => $"Drive {CurrentMountedDriveLetter?.ToString() ?? "-"}:",
+            WindowsAccessMode.NetworkLocation => $"Network Location '{CurrentMountedNetworkLocationName ?? "(unknown)"}'",
+            _ => "No Windows integration"
+        };
+    }
+
     private void NotifyMountStateCommandsChanged()
     {
         UnmountCommand.NotifyCanExecuteChanged();
@@ -839,12 +936,25 @@ public abstract partial class BaseMainViewModel : ObservableObject
     {
         CurrentMountedDiskIndex = mount.DiskIndex;
         CurrentMountedPartition = mount.PartitionNumber;
+        CurrentMountedAccessMode = mount.AccessMode;
         CurrentMountedDriveLetter = mount.DriveLetter;
-        CanOpenExplorer = true;
+        CurrentMountedNetworkLocationName = mount.NetworkLocationName;
+        CurrentMountedUncPath = mount.MountPathUNC;
+        CanOpenExplorer = !string.IsNullOrWhiteSpace(GetExplorerPath());
 
-        StatusMessage = $"Found existing mount: Disk {mount.DiskIndex} partition {mount.PartitionNumber} → {mount.DriveLetter}:";
-        Logger.LogInformation("Detected existing mount from state: Disk {DiskIndex} partition {Partition} at {DriveLetter}:",
-            mount.DiskIndex, mount.PartitionNumber, mount.DriveLetter);
+        StatusMessage = mount.AccessMode switch
+        {
+            WindowsAccessMode.DriveLetterLegacy => $"Found existing mount: Disk {mount.DiskIndex} partition {mount.PartitionNumber} -> {mount.DriveLetter}:",
+            WindowsAccessMode.NetworkLocation => $"Found existing mount: Disk {mount.DiskIndex} partition {mount.PartitionNumber} -> Network Location '{mount.NetworkLocationName}'.",
+            _ => $"Found existing mount: Disk {mount.DiskIndex} partition {mount.PartitionNumber} (None mode)."
+        };
+        Logger.LogInformation(
+            "Detected existing mount from state: Disk {DiskIndex} partition {Partition}, mode {AccessMode}, drive {DriveLetter}, network location {NetworkLocation}",
+            mount.DiskIndex,
+            mount.PartitionNumber,
+            mount.AccessMode,
+            mount.DriveLetter?.ToString() ?? "(none)",
+            mount.NetworkLocationName ?? "(none)");
 
         NotifyMountStateCommandsChanged();
     }
@@ -853,15 +963,19 @@ public abstract partial class BaseMainViewModel : ObservableObject
     {
         CurrentMountedDiskIndex = detectedMount.diskIndex;
         CurrentMountedPartition = detectedMount.partition;
+        CurrentMountedNetworkLocationName = null;
+        CurrentMountedUncPath = null;
 
         if (detectedMount.driveLetter != '\0')
         {
+            CurrentMountedAccessMode = WindowsAccessMode.DriveLetterLegacy;
             CurrentMountedDriveLetter = detectedMount.driveLetter;
             CanOpenExplorer = true;
             StatusMessage = $"Detected existing mount: Disk {detectedMount.diskIndex} → {detectedMount.driveLetter}:";
         }
         else
         {
+            CurrentMountedAccessMode = WindowsAccessMode.None;
             CurrentMountedDriveLetter = null;
             CanOpenExplorer = false;
             StatusMessage = $"Detected WSL mount for Disk {detectedMount.diskIndex} (no drive letter). Click Unmount to clean up.";

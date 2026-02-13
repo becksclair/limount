@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using LiMount.Core.Interfaces;
 using LiMount.Core.Models;
 using LiMount.Core.Configuration;
+using LiMount.Core.Results;
 
 namespace LiMount.Core.Services;
 
@@ -15,7 +16,7 @@ namespace LiMount.Core.Services;
 public class MountOrchestrator : IMountOrchestrator
 {
     private readonly IMountScriptService _mountScriptService;
-    private readonly IDriveMappingService _driveMappingService;
+    private readonly IWindowsAccessService _windowsAccessService;
     private readonly IMountHistoryService? _historyService;
     private readonly IMountStateService? _mountStateService;
     private readonly ILogger<MountOrchestrator>? _logger;
@@ -31,7 +32,7 @@ public class MountOrchestrator : IMountOrchestrator
     /// Initializes a new instance of <see cref="MountOrchestrator"/> using the provided services.
     /// </summary>
     /// <param name="mountScriptService">Service for executing mount/unmount scripts.</param>
-    /// <param name="driveMappingService">Service for drive letter mapping operations.</param>
+    /// <param name="windowsAccessService">Service for Windows access integration operations.</param>
     /// <param name="config">Configuration for mount operations.</param>
     /// <param name="historyService">Optional history service for tracking mount operations.</param>
     /// <param name="mountStateService">Optional state service for tracking active mounts.</param>
@@ -39,17 +40,17 @@ public class MountOrchestrator : IMountOrchestrator
     /// <exception cref="ArgumentNullException">Thrown when required parameters are null.</exception>
     public MountOrchestrator(
         IMountScriptService mountScriptService,
-        IDriveMappingService driveMappingService,
+        IWindowsAccessService windowsAccessService,
         IOptions<LiMountConfiguration> config,
         IMountHistoryService? historyService = null,
         IMountStateService? mountStateService = null,
         ILogger<MountOrchestrator>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(mountScriptService);
-        ArgumentNullException.ThrowIfNull(driveMappingService);
+        ArgumentNullException.ThrowIfNull(windowsAccessService);
         ArgumentNullException.ThrowIfNull(config);
         _mountScriptService = mountScriptService;
-        _driveMappingService = driveMappingService;
+        _windowsAccessService = windowsAccessService;
         _config = config.Value.MountOperations;
         _historyService = historyService;
         _mountStateService = mountStateService;
@@ -63,11 +64,12 @@ public class MountOrchestrator : IMountOrchestrator
     }
 
     /// <summary>
-    /// Orchestrates mounting a disk inside WSL and mapping a Windows drive letter to the resulting UNC share.
+    /// Orchestrates mounting a disk inside WSL and creating the configured Windows access surface.
     /// </summary>
     /// <param name="diskIndex">Zero-based index of the disk to mount. Must be non-negative.</param>
     /// <param name="partition">Partition number on the disk to mount. Must be greater than 0.</param>
-    /// <param name="driveLetter">Drive letter to assign for the Windows mapping. Must be a valid letter (A-Z).</param>
+    /// <param name="accessMode">Windows access mode to apply after mount.</param>
+    /// <param name="driveLetter">Optional drive letter for legacy drive-letter mode.</param>
     /// <param name="fsType">Filesystem type to use for mounting (e.g., "ext4"). Cannot be empty or null.</param>
     /// <param name="distroName">Optional WSL distribution name to perform the mount under; if null, a default or detection may be used.</param>
     /// <param name="progress">Optional progress reporter that receives status messages during the operation.</param>
@@ -78,7 +80,8 @@ public class MountOrchestrator : IMountOrchestrator
     public async Task<MountAndMapResult> MountAndMapAsync(
         int diskIndex,
         int partition,
-        char driveLetter,
+        WindowsAccessMode accessMode,
+        char? driveLetter = null,
         string fsType = "ext4",
         string? distroName = null,
         IProgress<string>? progress = null,
@@ -87,22 +90,35 @@ public class MountOrchestrator : IMountOrchestrator
         // Validate parameters
         if (diskIndex < 0)
         {
-            return MountAndMapResult.CreateFailure(diskIndex, partition, "Disk index must be non-negative", "validation");
+            var validationFailure = MountAndMapResult.CreateFailure(diskIndex, partition, "Disk index must be non-negative", "validation");
+            validationFailure.AccessMode = accessMode;
+            return validationFailure;
         }
 
         if (partition < 1)
         {
-            return MountAndMapResult.CreateFailure(diskIndex, partition, "Partition number must be greater than 0", "validation");
+            var validationFailure = MountAndMapResult.CreateFailure(diskIndex, partition, "Partition number must be greater than 0", "validation");
+            validationFailure.AccessMode = accessMode;
+            return validationFailure;
         }
 
-        if (!char.IsLetter(driveLetter))
+        if (accessMode == WindowsAccessMode.DriveLetterLegacy &&
+            (!driveLetter.HasValue || !char.IsLetter(driveLetter.Value)))
         {
-            return MountAndMapResult.CreateFailure(diskIndex, partition, "Drive letter must be a valid letter (A-Z)", "validation");
+            var validationFailure = MountAndMapResult.CreateFailure(
+                diskIndex,
+                partition,
+                "Drive letter must be a valid letter (A-Z) in legacy drive-letter mode.",
+                "validation");
+            validationFailure.AccessMode = accessMode;
+            return validationFailure;
         }
 
         if (string.IsNullOrWhiteSpace(fsType))
         {
-            return MountAndMapResult.CreateFailure(diskIndex, partition, "Filesystem type cannot be empty", "validation");
+            var validationFailure = MountAndMapResult.CreateFailure(diskIndex, partition, "Filesystem type cannot be empty", "validation");
+            validationFailure.AccessMode = accessMode;
+            return validationFailure;
         }
 
         progress?.Report($"Starting mount operation for disk {diskIndex} partition {partition}...");
@@ -114,7 +130,10 @@ public class MountOrchestrator : IMountOrchestrator
             try
             {
                 existingMountForPartition = await _mountStateService.GetMountForDiskPartitionAsync(diskIndex, partition, cancellationToken);
-                existingMountForDriveLetter = await _mountStateService.GetMountForDriveLetterAsync(driveLetter, cancellationToken);
+                if (accessMode == WindowsAccessMode.DriveLetterLegacy && driveLetter.HasValue)
+                {
+                    existingMountForDriveLetter = await _mountStateService.GetMountForDriveLetterAsync(driveLetter.Value, cancellationToken);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -123,11 +142,11 @@ public class MountOrchestrator : IMountOrchestrator
             catch (Exception ex)
             {
                 // Best-effort: mount state lookup failure should not block the workflow
-                _logger?.LogWarning(ex, "Mount state lookup failed for disk {DiskIndex} / drive {DriveLetter}; proceeding without conflict detection", diskIndex, driveLetter);
+                _logger?.LogWarning(ex, "Mount state lookup failed for disk {DiskIndex}; proceeding without conflict detection", diskIndex);
             }
         }
 
-        // Preflight drive letter usage before starting any side effects
+        // Preflight drive letter usage before starting any side effects (legacy mode only)
         if (existingMountForDriveLetter != null)
         {
             if (IsSameTarget(existingMountForDriveLetter, diskIndex, partition, null, null))
@@ -137,18 +156,22 @@ public class MountOrchestrator : IMountOrchestrator
                 return MountAndMapResult.CreateSuccess(
                     existingMountForDriveLetter.DiskIndex,
                     existingMountForDriveLetter.PartitionNumber,
-                    existingMountForDriveLetter.DriveLetter,
+                    existingMountForDriveLetter.AccessMode,
                     existingMountForDriveLetter.DistroName,
                     existingMountForDriveLetter.MountPathLinux,
-                    existingMountForDriveLetter.MountPathUNC);
+                    existingMountForDriveLetter.MountPathUNC,
+                    existingMountForDriveLetter.DriveLetter,
+                    existingMountForDriveLetter.NetworkLocationName);
             }
 
             // Conflict: drive letter is in use by a different target
-            return MountAndMapResult.CreateFailure(
+            var validationFailure = MountAndMapResult.CreateFailure(
                 diskIndex,
                 partition,
                 $"Drive letter {driveLetter} is already mapped to a different target (disk {existingMountForDriveLetter.DiskIndex} partition {existingMountForDriveLetter.PartitionNumber}).",
                 "validation");
+            validationFailure.AccessMode = accessMode;
+            return validationFailure;
         }
 
         // Step 1: Mount disk in WSL
@@ -166,11 +189,13 @@ public class MountOrchestrator : IMountOrchestrator
         }
         catch (OperationCanceledException)
         {
-            return MountAndMapResult.CreateFailure(
+            var canceledFailure = MountAndMapResult.CreateFailure(
                 diskIndex,
                 partition,
                 "Operation canceled during mount.",
                 "mount");
+            canceledFailure.AccessMode = accessMode;
+            return canceledFailure;
         }
 
         if (!mountResult.Success)
@@ -219,11 +244,13 @@ public class MountOrchestrator : IMountOrchestrator
                 }
                 catch (OperationCanceledException)
                 {
-                    return MountAndMapResult.CreateFailure(
+                    var retryCanceledFailure = MountAndMapResult.CreateFailure(
                         diskIndex,
                         partition,
                         "Operation canceled during mount retry.",
                         "mount");
+                    retryCanceledFailure.AccessMode = accessMode;
+                    return retryCanceledFailure;
                 }
             }
         }
@@ -238,6 +265,7 @@ public class MountOrchestrator : IMountOrchestrator
                 partition,
                 failureMessage,
                 "mount");
+            failureResult.AccessMode = accessMode;
 
             await LogToHistoryAsync(failureResult, cancellationToken);
             return failureResult;
@@ -254,6 +282,7 @@ public class MountOrchestrator : IMountOrchestrator
                 partition,
                 "Mount succeeded but no UNC path was returned. Aborting before drive mapping.",
                 "mount");
+            failureResult.AccessMode = accessMode;
 
             var cleanupNote = await TryRollbackUnmountAsync(
                 diskIndex,
@@ -278,6 +307,7 @@ public class MountOrchestrator : IMountOrchestrator
                 partition,
                 $"UNC path {uncPath} is not accessible after {uncAttemptCount} attempt(s).",
                 "mount");
+            failureResult.AccessMode = accessMode;
 
             var cleanupNote = await TryRollbackUnmountAsync(
                 diskIndex,
@@ -292,25 +322,37 @@ public class MountOrchestrator : IMountOrchestrator
             return failureResult;
         }
 
-        // Step 2: Map drive letter
-        progress?.Report($"Mapping drive letter {driveLetter}:...");
+        // Step 2: Apply Windows access mode.
+        progress?.Report(accessMode switch
+        {
+            WindowsAccessMode.NetworkLocation => "Creating Explorer Network Location...",
+            WindowsAccessMode.DriveLetterLegacy => $"Mapping drive letter {driveLetter}:...",
+            _ => "Skipping Windows integration (None mode)..."
+        });
 
-        MappingResult mappingResult;
+        Result<WindowsAccessInfo> windowsAccessResult;
         try
         {
-            mappingResult = await _driveMappingService.ExecuteMappingScriptAsync(
-                driveLetter,
-                uncPath,
+            windowsAccessResult = await _windowsAccessService.CreateAccessAsync(
+                new WindowsAccessRequest
+                {
+                    AccessMode = accessMode,
+                    TargetUNC = uncPath,
+                    DriveLetter = driveLetter,
+                    DiskIndex = diskIndex,
+                    PartitionNumber = partition
+                },
                 cancellationToken);
         }
         catch (OperationCanceledException)
         {
-            progress?.Report("Drive mapping canceled; attempting rollback.");
+            progress?.Report("Windows access setup canceled; attempting rollback.");
             var failureResult = MountAndMapResult.CreateFailure(
                 diskIndex,
                 partition,
-                "Operation canceled during drive mapping.",
+                "Operation canceled during Windows access setup.",
                 "map");
+            failureResult.AccessMode = accessMode;
 
             var cleanupNote = await TryRollbackUnmountAsync(
                 diskIndex,
@@ -325,14 +367,15 @@ public class MountOrchestrator : IMountOrchestrator
             return failureResult;
         }
 
-        if (!mappingResult.Success)
+        if (windowsAccessResult.IsFailure || windowsAccessResult.Value == null)
         {
-            progress?.Report($"Drive mapping failed: {mappingResult.ErrorMessage}");
+            progress?.Report($"Windows access setup failed: {windowsAccessResult.ErrorMessage}");
             var failureResult = MountAndMapResult.CreateFailure(
                 diskIndex,
                 partition,
-                mappingResult.ErrorMessage ?? "Unknown error during mapping",
-                "map");
+                windowsAccessResult.ErrorMessage ?? "Unknown error during Windows access setup",
+                windowsAccessResult.FailedStep ?? "map");
+            failureResult.AccessMode = accessMode;
 
             var cleanupNote = await TryRollbackUnmountAsync(
                 diskIndex,
@@ -344,20 +387,27 @@ public class MountOrchestrator : IMountOrchestrator
             failureResult.ErrorMessage = AppendCleanupNote(failureResult.ErrorMessage, cleanupNote);
 
             await LogToHistoryAsync(failureResult, cancellationToken);
-
             return failureResult;
         }
 
-        progress?.Report($"Successfully mapped as {driveLetter}:");
+        var windowsAccess = windowsAccessResult.Value;
+        progress?.Report(windowsAccess.AccessMode switch
+        {
+            WindowsAccessMode.NetworkLocation => $"Network Location '{windowsAccess.NetworkLocationName}' created.",
+            WindowsAccessMode.DriveLetterLegacy => $"Successfully mapped as {windowsAccess.DriveLetter}:",
+            _ => "Mount completed without Windows integration."
+        });
 
         // Create success result
         var result = MountAndMapResult.CreateSuccess(
             diskIndex,
             partition,
-            driveLetter,
+            windowsAccess.AccessMode,
             mountResult.DistroName ?? "Unknown",
             mountResult.MountPathLinux ?? string.Empty,
-            mountResult.MountPathUNC ?? string.Empty);
+            mountResult.MountPathUNC ?? string.Empty,
+            windowsAccess.DriveLetter,
+            windowsAccess.NetworkLocationName);
 
         // Register state when mapping succeeds
         if (_mountStateService != null)
@@ -575,7 +625,9 @@ public class MountOrchestrator : IMountOrchestrator
             Id = Guid.NewGuid().ToString(),
             DiskIndex = result.DiskIndex,
             PartitionNumber = result.Partition,
-            DriveLetter = result.DriveLetter ?? default,
+            AccessMode = result.AccessMode,
+            DriveLetter = result.DriveLetter,
+            NetworkLocationName = result.NetworkLocationName,
             DistroName = result.DistroName ?? string.Empty,
             MountPathLinux = result.MountPathLinux ?? string.Empty,
             MountPathUNC = result.MountPathUNC ?? string.Empty,

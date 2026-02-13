@@ -118,7 +118,9 @@ public class MountStateService : IMountStateService, IDisposable
                 Id = mount.Id,
                 DiskIndex = mount.DiskIndex,
                 PartitionNumber = mount.PartitionNumber,
+                AccessMode = mount.AccessMode,
                 DriveLetter = mount.DriveLetter,
+                NetworkLocationName = mount.NetworkLocationName,
                 DistroName = mount.DistroName,
                 MountPathLinux = mount.MountPathLinux,
                 MountPathUNC = mount.MountPathUNC,
@@ -133,8 +135,13 @@ public class MountStateService : IMountStateService, IDisposable
             await SaveMountsInternalAsync(mounts, cancellationToken);
 
             _logger.LogInformation(
-                "Registered mount: Disk {DiskIndex} -> Drive {DriveLetter}: ({UNC})",
-                mountCopy.DiskIndex, mountCopy.DriveLetter, mountCopy.MountPathUNC);
+                "Registered mount: Disk {DiskIndex} Partition {Partition} Mode {AccessMode} Drive {DriveLetter} NetworkLocation {NetworkLocationName} ({UNC})",
+                mountCopy.DiskIndex,
+                mountCopy.PartitionNumber,
+                mountCopy.AccessMode,
+                mountCopy.DriveLetter?.ToString() ?? "(none)",
+                mountCopy.NetworkLocationName ?? "(none)",
+                mountCopy.MountPathUNC);
         }
         finally
         {
@@ -261,7 +268,8 @@ public class MountStateService : IMountStateService, IDisposable
             acquired = true;
             var mounts = await LoadMountsInternalAsync(cancellationToken);
             return mounts.FirstOrDefault(m =>
-                char.ToUpperInvariant(m.DriveLetter) == char.ToUpperInvariant(driveLetter));
+                m.DriveLetter.HasValue &&
+                char.ToUpperInvariant(m.DriveLetter.Value) == char.ToUpperInvariant(driveLetter));
         }
         finally
         {
@@ -301,19 +309,30 @@ public class MountStateService : IMountStateService, IDisposable
             var usedDriveLetters = new HashSet<char>(_driveLetterService.GetUsedLetters()
                 .Select(char.ToUpperInvariant));
 
-            // Phase 1: Quick synchronous check for drive letter validity
+            // Phase 1: Quick synchronous check for mode-specific validity
             foreach (var mount in mounts)
             {
-                var normalizedLetter = char.ToUpperInvariant(mount.DriveLetter);
-                var hasValidLetter = normalizedLetter >= 'A' && normalizedLetter <= 'Z';
-                var driveStillMapped = hasValidLetter && usedDriveLetters.Contains(normalizedLetter);
-
-                if (!driveStillMapped)
+                if (mount.AccessMode == WindowsAccessMode.DriveLetterLegacy)
                 {
-                    _logger.LogWarning(
-                        "Found orphaned mount: Disk {DiskIndex} -> Drive {DriveLetter}: (drive letter no longer mapped)",
-                        mount.DiskIndex, mount.DriveLetter);
-                    orphanedMounts.Add(mount);
+                    var normalizedLetter = mount.DriveLetter.HasValue
+                        ? char.ToUpperInvariant(mount.DriveLetter.Value)
+                        : '\0';
+                    var hasValidLetter = normalizedLetter >= 'A' && normalizedLetter <= 'Z';
+                    var driveStillMapped = hasValidLetter && usedDriveLetters.Contains(normalizedLetter);
+
+                    if (!driveStillMapped)
+                    {
+                        _logger.LogWarning(
+                            "Found orphaned legacy mount: Disk {DiskIndex} Partition {Partition} Drive {DriveLetter} (drive letter no longer mapped)",
+                            mount.DiskIndex,
+                            mount.PartitionNumber,
+                            mount.DriveLetter?.ToString() ?? "(none)");
+                        orphanedMounts.Add(mount);
+                    }
+                    else
+                    {
+                        validMounts.Add(mount);
+                    }
                 }
                 else
                 {
@@ -348,9 +367,9 @@ public class MountStateService : IMountStateService, IDisposable
                             "UNC path {UNC} for Disk {DiskIndex} is temporarily inaccessible; drive {DriveLetter} is still mapped.",
                             mount.MountPathUNC,
                             mount.DiskIndex,
-                            mount.DriveLetter);
-                    }
+                            mount.DriveLetter?.ToString() ?? "(none)");
                 }
+            }
             }
 
             // Phase 3: Update verified status based on actual verification results

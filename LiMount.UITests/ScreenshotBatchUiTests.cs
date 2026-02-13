@@ -92,7 +92,11 @@ public class ScreenshotBatchUiTests
             var window = GetMainWindow(launched.Application, launched.Automation);
             EnsureWindowHasRoomForFormCaptures(window);
             WaitForComboToHaveItems(window, DiskComboBoxId, "disk");
-            WaitForComboToHaveItems(window, DriveLetterComboBoxId, "drive letter");
+            var driveLetterVisible = TryGetVisibleComboBox(window, DriveLetterComboBoxId, out _);
+            if (driveLetterVisible)
+            {
+                WaitForComboToHaveItems(window, DriveLetterComboBoxId, "drive letter");
+            }
             EnsureCombosCollapsed(window, DiskComboBoxId, PartitionComboBoxId, DriveLetterComboBoxId);
 
             CaptureScreenshot(window, screenshotScriptPath, Path.Combine(outputDirectory, "01-main-initial.png"));
@@ -112,11 +116,19 @@ public class ScreenshotBatchUiTests
                 screenshotScriptPath,
                 Path.Combine(outputDirectory, "03-main-partition-dropdown-open.png"));
 
-            ExpandComboAndCapture(
-                window,
-                DriveLetterComboBoxId,
-                screenshotScriptPath,
-                Path.Combine(outputDirectory, "04-main-drive-letter-dropdown-open.png"));
+            if (driveLetterVisible)
+            {
+                ExpandComboAndCapture(
+                    window,
+                    DriveLetterComboBoxId,
+                    screenshotScriptPath,
+                    Path.Combine(outputDirectory, "04-main-drive-letter-dropdown-open.png"));
+            }
+            else
+            {
+                // Default network-location mode hides the drive letter picker; keep deterministic filename.
+                CaptureScreenshot(window, screenshotScriptPath, Path.Combine(outputDirectory, "04-main-drive-letter-dropdown-open.png"));
+            }
 
             EnsureCombosCollapsed(window, DiskComboBoxId, PartitionComboBoxId, DriveLetterComboBoxId);
         }
@@ -307,6 +319,17 @@ public class ScreenshotBatchUiTests
     {
         return window.FindFirstDescendant(cf => cf.ByAutomationId(automationId))?.AsComboBox()
             ?? throw new InvalidOperationException($"ComboBox '{automationId}' was not found.");
+    }
+
+    private static bool TryGetVisibleComboBox(Window window, string automationId, out ComboBox? comboBox)
+    {
+        comboBox = window.FindFirstDescendant(cf => cf.ByAutomationId(automationId))?.AsComboBox();
+        if (comboBox == null)
+        {
+            return false;
+        }
+
+        return !comboBox.IsOffscreen;
     }
 
     private static void WaitForComboToHaveItems(Window window, string automationId, string displayName)

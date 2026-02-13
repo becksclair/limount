@@ -47,9 +47,19 @@ public class MountHistoryEntry
     public int? PartitionNumber { get; set; }
 
     /// <summary>
-    /// Drive letter that was mapped/unmapped (if any).
+    /// Drive letter that was mapped/unmapped in legacy mode (if any).
     /// </summary>
     public char? DriveLetter { get; set; }
+
+    /// <summary>
+    /// Windows access mode used for this operation.
+    /// </summary>
+    public WindowsAccessMode AccessMode { get; set; }
+
+    /// <summary>
+    /// Explorer Network Location name used/removed in network location mode.
+    /// </summary>
+    public string? NetworkLocationName { get; set; }
 
     /// <summary>
     /// WSL distribution name used for the mount operation (if any).
@@ -93,6 +103,8 @@ public class MountHistoryEntry
             DiskIndex = result.DiskIndex,
             PartitionNumber = result.Partition,
             DriveLetter = result.DriveLetter,
+            AccessMode = result.AccessMode,
+            NetworkLocationName = result.NetworkLocationName,
             DistroName = result.DistroName,
             MountPathLinux = result.MountPathLinux,
             MountPathUNC = result.MountPathUNC,
@@ -113,6 +125,8 @@ public class MountHistoryEntry
             OperationType = MountHistoryOperationType.Unmount,
             DiskIndex = result.DiskIndex,
             DriveLetter = result.DriveLetter,
+            AccessMode = result.AccessMode,
+            NetworkLocationName = result.NetworkLocationName,
             Success = result.Success,
             ErrorMessage = result.ErrorMessage,
             FailedStep = result.FailedStep

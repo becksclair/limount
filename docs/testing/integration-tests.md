@@ -1,59 +1,44 @@
 # Integration Testing Guide for LiMount
 
-This document describes integration testing for LiMount. Since LiMount is a Windows-only WinUI 3 application that interacts with WSL, WMI, and PowerShell, comprehensive integration testing requires a Windows environment.
+This document describes integration testing for LiMount in real Windows + WSL environments.
+
+LiMount now supports three Windows access modes:
+- `NetworkLocation` (default)
+- `DriveLetterLegacy`
+- `None`
 
 ---
 
 ## Testing Strategy Overview
 
-### Unit Tests (Automated, Cross-Platform)
+### Unit and Service Tests (Automated, Cross-Platform)
 
-**Location**: `LiMount.Tests/`
-**Run on**: Any platform (Linux, Windows, macOS)
-**Coverage**: Business logic, validation, models, result objects
+**Location**: `LiMount.Tests/`  
+**Run on**: Any platform  
+**Coverage**: core business logic, contracts, orchestration, state/history, validation
 
-**What we test**:
-- ✅ Service interfaces and contracts
-- ✅ Validation logic (parameter checking)
-- ✅ Result object creation (FromDictionary, CreateSuccess, CreateFailure)
-- ✅ Configuration parsing (IOptions integration)
-- ✅ State management (MountStateService with mocked file system)
-- ✅ History logging (MountHistoryService with mocked file system)
+Run:
 
-**What we mock**:
-- IScriptExecutor (PowerShell execution)
-- IDiskEnumerationService (WMI queries)
-- File system operations (for state/history services)
-- IDialogService (MessageBox abstraction)
-
-**Running unit tests**:
-```bash
-# On any platform
-cd LiMount.Tests
-dotnet test
-
-# With coverage
-dotnet test --collect:"XCode Code Coverage"
+```powershell
+dotnet test LiMount.Tests
 ```
-
-**Current status**: 27+ unit tests, 85%+ coverage on testable logic
-
----
 
 ### UI Automation Tests (Automated, Windows-only runner)
 
 **Project**: `LiMount.UITests/`  
 **Framework**: xUnit + FlaUI UIA3  
-**Mode**: deterministic test mode via environment variables
+**Mode**: deterministic test mode via env vars
 
-**Enable and run**:
+Run:
+
 ```powershell
 $env:LIMOUNT_RUN_UI_TESTS='1'
 dotnet test LiMount.UITests
 Remove-Item Env:\LIMOUNT_RUN_UI_TESTS
 ```
 
-Optional screenshot artifacts while tests run:
+Optional screenshot capture:
+
 ```powershell
 $env:LIMOUNT_RUN_UI_TESTS='1'
 $env:LIMOUNT_CAPTURE_SCREENSHOT='1'
@@ -62,55 +47,27 @@ Remove-Item Env:\LIMOUNT_RUN_UI_TESTS
 Remove-Item Env:\LIMOUNT_CAPTURE_SCREENSHOT
 ```
 
-**Scenarios covered**:
-- Simulated unsupported XFS mount shows actionable diagnostic text (`XFS_UNSUPPORTED_FEATURES`)
-- Simulated success flow shows mounted-success status text
+Full screenshot batch:
 
-### Integration Tests (Hardware-in-loop, Windows-only)
+```powershell
+$env:LIMOUNT_RUN_UI_TESTS='1'
+$env:LIMOUNT_CAPTURE_SCREENSHOT_BATCH='1'
+dotnet test LiMount.UITests --filter "FullyQualifiedName~ScreenshotBatchUiTests"
+Remove-Item Env:\LIMOUNT_RUN_UI_TESTS
+Remove-Item Env:\LIMOUNT_CAPTURE_SCREENSHOT_BATCH
+```
 
-**Environment**: Windows 11 (Build 22000+) with WSL2 installed
-**Coverage**: End-to-end workflows, PowerShell scripts, WMI queries, actual mounting
+### Hardware-in-loop Tests (Windows-only, real disk + WSL)
 
-**What we test**:
-- Disk enumeration (real WMI queries)
-- PowerShell script execution (elevated and non-elevated)
-- WSL mount/unmount operations
-- Drive letter mapping
-- UNC path accessibility
-- State persistence across restarts
-- History logging
-- UI workflows
+Use only on machines with admin access and explicitly chosen non-system test disks.
 
-**Why this remains semi-automated?**
-- Requires local Windows + WSL2 and access to a real test disk/partition
-- Uses real OS state and hardware, not pure mocks
-- Still depends on environment-specific disk contents and kernel capabilities
-
-Run the hardware-in-loop helper:
+Run expected-failure validation:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\run-hil-mount-test.ps1 -DiskIndex 1 -Partition 2 -ExpectXfsUnsupported
 ```
 
-Run a full drive-level verification (expected failure + required success mount/unmount on another partition):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-hil-mount-test.ps1 -DiskIndex 1 -VerifyDriveEndToEnd -FailurePartition 2
-```
-
-Notes:
-- The runner sets `LIMOUNT_REQUIRE_HIL=1`, so integration tests fail instead of silently skipping.
-- The runner sets `LIMOUNT_SKIP_SCRIPT_ELEVATION=0` by default, so it validates the normal elevated script path.
-- Use `-SkipScriptElevation` only when direct non-elevated `wsl --mount` is allowed in your environment.
-
-### Recent Regression Validation (February 11, 2026)
-
-This workflow was validated on a real disk with two partitions:
-
-- `Disk 1, Partition 2`: expected failure (`XFS_UNSUPPORTED_FEATURES`) due to unsupported XFS kernel features in WSL.
-- `Disk 1, Partition 1`: required success path (mount + UNC access + unmount) completed.
-
-Use this exact command to reproduce the combined validation:
+Run drive-level verification:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\run-hil-mount-test.ps1 -DiskIndex 1 -VerifyDriveEndToEnd -FailurePartition 2
@@ -120,563 +77,207 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run-hil-mount-test.ps1 -DiskI
 
 ## Integration Test Scenarios
 
-### Scenario 1: Basic Mount and Map Workflow
+### Scenario 1: Basic Mount/Unmount (Default Network Location)
 
 **Estimated time**: 2-3 minutes
 
-**Prerequisites**:
-- Windows 11 with WSL2 installed
-- At least one WSL distro (Ubuntu recommended)
-- External USB drive or virtual disk with a mountable Linux partition (for success path)
-
 **Steps**:
-1. Launch LiMount application
-2. Click "Refresh" button
-3. Verify disk list populates with available disks
-4. Select a disk with Linux partition
-5. Select the Linux partition
-6. Select an available drive letter (e.g., Z:)
-7. Select filesystem type (ext4)
-8. Click "Mount" button
-9. Accept UAC elevation prompt
-10. Wait for mount to complete (progress messages should appear)
-11. Verify drive appears in Windows Explorer
-12. Open drive in Explorer (click "Open in Explorer" button)
-13. Verify you can read/write files
-14. Close Explorer
-15. Click "Unmount" button
-16. Verify drive disappears from Explorer
-17. Verify status shows "Ready"
+1. Launch LiMount.
+2. Refresh and select a disk + Linux partition.
+3. Confirm access mode is `NetworkLocation` (default).
+4. Click **Mount** and accept UAC prompt.
+5. Wait for success status.
+6. Click **Open in Explorer**.
+7. Verify UNC content is accessible.
+8. Click **Unmount**.
+9. Verify cleanup succeeds and UI returns to ready state.
 
-**Expected Results**:
-- ✅ Disk enumeration shows Linux partitions
-- ✅ Mount completes successfully with progress updates
-- ✅ Drive letter appears in Explorer
-- ✅ Files are accessible (read/write)
-- ✅ Unmount completes successfully
-- ✅ Drive letter disappears from Explorer
-- ✅ No error messages
+**Expected results**:
+- `NetworkLocation` mount succeeds with no drive-letter selection.
+- Explorer opens mounted content.
+- Unmount removes network-location integration and WSL mount.
 
-**Validation**:
+**Validation commands**:
+
 ```powershell
-# Verify mount in WSL
 wsl -e ls /mnt/wsl/
-
-# Verify drive mapping
-Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Name -eq "Z" }
-
-# Verify UNC path
 Test-Path \\wsl$\Ubuntu\mnt\wsl\PHYSICALDRIVE1p1
+Test-Path "$env:APPDATA\Microsoft\Windows\Network Shortcuts"
 ```
 
 ---
 
-### Scenario 2: Mount State Persistence
+### Scenario 2: Legacy Drive-Letter Mode
+
+**Estimated time**: 2-3 minutes
+
+**Steps**:
+1. Set access mode to `DriveLetterLegacy`.
+2. Select a free drive letter.
+3. Mount and confirm success.
+4. Open in Explorer and validate `<DriveLetter>:\`.
+5. Unmount and verify mapping is removed.
+
+**Expected results**:
+- Drive letter is required only in legacy mode.
+- Mapping appears and is removed correctly.
+
+**Validation commands**:
+
+```powershell
+subst
+Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Name -eq "Z" }
+```
+
+---
+
+### Scenario 3: None Mode (Mount-only)
+
+**Estimated time**: 1-2 minutes
+
+**Steps**:
+1. Set access mode to `None`.
+2. Mount selected disk/partition.
+3. Verify mount success.
+4. Verify **Open in Explorer** is disabled.
+5. Unmount.
+
+**Expected results**:
+- Mount/unmount works with no Windows integration script calls.
+- Explorer action is unavailable in this mode.
+
+---
+
+### Scenario 4: State Persistence and Restore
 
 **Estimated time**: 3-4 minutes
 
-**Purpose**: Verify that mount state survives application restart
-
 **Steps**:
-1. Mount a disk (follow Scenario 1 steps 1-10)
-2. Close LiMount application
-3. Open Windows Explorer, verify drive is still accessible
-4. Re-launch LiMount application
-5. Verify "Unmount" button is visible (app detected existing mount)
-6. Verify status shows mount information
-7. Click "Unmount" button
-8. Verify unmount succeeds
+1. Mount successfully in each mode (`NetworkLocation`, `DriveLetterLegacy`, `None`) across separate runs.
+2. Restart app after each mount.
+3. Verify active mount is detected and shown with correct access metadata.
+4. Unmount after restore.
 
-**Expected Results**:
-- ✅ Mount persists after app close
-- ✅ App detects existing mount on startup
-- ✅ UI reflects mount state correctly
-- ✅ Unmount works after restart
+**Expected results**:
+- Restored status reflects mode-aware details.
+- Non-legacy mounts are not pruned due to missing drive letters.
 
-**Validation**:
+**Validation commands**:
+
 ```powershell
-# Check state file exists
 Test-Path "$env:LocalAppData\LiMount\mount-state.json"
-
-# Read state file
 Get-Content "$env:LocalAppData\LiMount\mount-state.json" | ConvertFrom-Json
 ```
 
 ---
 
-### Scenario 3: Mount History Tracking
+### Scenario 5: History Metadata Validation
 
 **Estimated time**: 1-2 minutes
 
-**Purpose**: Verify that all mount/unmount operations are logged
-
 **Steps**:
-1. Mount a disk successfully
-2. Unmount the disk
-3. Click "View History" button
-4. Verify history window shows both operations
-5. Verify timestamps are correct
-6. Verify status (Success/Failure) is correct
-7. Verify disk/partition/drive information is accurate
-8. Click "Close" button
+1. Perform mount/unmount in each access mode.
+2. Open history view.
+3. Verify entries include mode-specific metadata:
+   - `DriveLetterLegacy`: drive letter
+   - `NetworkLocation`: network location name
+   - `None`: explicit no-access indication
 
-**Expected Results**:
-- ✅ History window opens
-- ✅ Mount operation logged with "Success" status
-- ✅ Unmount operation logged with "Success" status
-- ✅ All details are accurate (disk, partition, drive, timestamp)
+**Expected results**:
+- History data is complete and mode-aware.
 
-**Validation**:
+**Validation commands**:
+
 ```powershell
-# Check history file exists
 Test-Path "$env:LocalAppData\LiMount\mount-history.json"
-
-# Read history file
 Get-Content "$env:LocalAppData\LiMount\mount-history.json" | ConvertFrom-Json
 ```
 
 ---
 
-### Scenario 4: Error Handling - Invalid Disk Selection
+### Scenario 6: Access-Mode Error Handling
 
-**Estimated time**: 30 seconds
+**Estimated time**: 2-3 minutes
 
-**Purpose**: Verify graceful error handling for invalid selections
-
-**Steps**:
-1. Launch LiMount
-2. Don't select any disk (leave combo box empty)
-3. Click "Mount" button
-
-**Expected Results**:
-- ✅ Mount button should be disabled (CanExecute prevents click)
-- ✅ OR: Validation error message displayed
-- ✅ No crash or exception
-
-**Alternative Test**:
-1. Select a disk
-2. Select a partition
-3. Manually eject/disconnect the disk
-4. Click "Mount" button
-
-**Expected Results**:
-- ✅ Error message displayed ("Disk not found" or similar)
-- ✅ Status shows error
-- ✅ No crash
+**Checks**:
+- Attempt legacy mount without drive letter -> validation error.
+- Attempt with an already-used drive letter in legacy mode -> conflict handling.
+- Invalid disk/partition selection -> no crash, actionable error.
+- WSL stopped (`wsl --shutdown`) -> environment failure is surfaced.
 
 ---
 
-### Scenario 5: Error Handling - WSL Not Running
-
-**Estimated time**: 1 minute
-
-**Purpose**: Verify environment validation detects WSL issues
-
-**Steps**:
-1. Stop all WSL instances: `wsl --shutdown`
-2. Launch LiMount
-3. Attempt to mount a disk
-
-**Expected Results**:
-- ✅ Error message: "WSL is not running" or "No WSL distro found"
-- ✅ Helpful guidance on how to fix (start WSL, install distro)
-- ✅ No crash
-
-**Validation**:
-```powershell
-# Verify WSL is stopped
-wsl --list --verbose  # Should show "Stopped"
-```
-
----
-
-### Scenario 6: Error Handling - Drive Letter Already in Use
-
-**Estimated time**: 2 minutes
-
-**Purpose**: Verify detection of drive letter conflicts
-
-**Steps**:
-1. Map a network drive to Z: manually
-   ```powershell
-   net use Z: \\someserver\someshare
-   ```
-2. Launch LiMount
-3. Try to mount a disk to Z:
-4. Verify Z: is NOT in the "Available Drive Letters" list
-
-**Expected Results**:
-- ✅ Z: does not appear in drive letter dropdown
-- ✅ Only truly available letters are shown
-- ✅ No conflict occurs
-
----
-
-### Scenario 7: Concurrent Mounts
-
-**Estimated time**: 4-5 minutes
-
-**Purpose**: Verify multiple disks can be mounted simultaneously
-
-**Steps**:
-1. Connect multiple USB drives with Linux partitions (or use virtual disks)
-2. Mount first disk to Z:
-3. Refresh disk list
-4. Mount second disk to Y:
-5. Verify both drives appear in Explorer
-6. Unmount both drives
-
-**Expected Results**:
-- ✅ Both disks mount successfully
-- ✅ Both drive letters appear in Explorer
-- ✅ State file tracks both mounts
-- ✅ Both can be unmounted independently
-- ✅ No interference between mounts
-
----
-
-### Scenario 8: PowerShell Script Execution
+### Scenario 7: Script Contract Verification
 
 **Estimated time**: 3-4 minutes
 
-**Purpose**: Verify PowerShell scripts execute correctly with elevation
+**Purpose**: Validate key-value outputs and mode routing.
 
-**Steps**:
-1. Enable PowerShell script logging:
-   ```powershell
-   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-   ```
-2. Mount a disk (triggers Mount-LinuxDiskCore.ps1)
-3. Check temp file was created and contains output:
-   ```powershell
-   Get-ChildItem $env:TEMP | Where-Object { $_.Name -like "limount_mount_*" }
-   ```
-4. Map drive (triggers Map-WSLShareToDrive.ps1)
-5. Unmount (triggers Unmount-LinuxDisk.ps1 and Unmap-DriveLetter.ps1)
-
-**Expected Results**:
-- ✅ Elevated scripts create temp files in %TEMP%
-- ✅ Temp files contain key=value output
-- ✅ Non-elevated scripts output directly to stdout
-- ✅ All scripts complete successfully
-- ✅ Temp files are cleaned up after operation
-
-**Validation**:
-```powershell
-# Check for leftover temp files (should be cleaned up)
-Get-ChildItem $env:TEMP | Where-Object { $_.Name -like "limount_*" }
-
-# Should return empty
-```
+**Checks**:
+- `NetworkLocation` mode calls:
+  - `scripts\network\Create-NetworkLocation.ps1`
+  - `scripts\network\Remove-NetworkLocation.ps1`
+- `DriveLetterLegacy` mode calls:
+  - `scripts\Map-WSLShareToDrive.ps1`
+  - `scripts\Unmap-DriveLetter.ps1`
+- `None` mode performs no Windows integration action.
 
 ---
 
-### Scenario 9: Logging Verification
-
-**Estimated time**: 2-3 minutes
-
-**Purpose**: Verify Serilog file logging works in production mode
-
-**Steps**:
-1. Build application in Release mode
-2. Run application (not from debugger)
-3. Perform mount/unmount operations
-4. Check log file exists:
-   ```powershell
-   Get-ChildItem "$env:LocalAppData\LiMount\logs"
-   ```
-5. Open log file, verify entries exist
-6. Verify log level is appropriate (Info, Warning, Error)
-
-**Expected Results**:
-- ✅ Log file exists in %LocalAppData%\LiMount\logs\
-- ✅ Log file named: limount-YYYYMMDD.log
-- ✅ Log entries include timestamps, level, message
-- ✅ Errors are logged with stack traces
-- ✅ Log rotation works (new file daily)
-
-**Validation**:
-```powershell
-# Check log file content
-Get-Content "$env:LocalAppData\LiMount\logs\limount-*.log" | Select-Object -First 20
-```
-
----
-
-### Scenario 10: Configuration Customization
-
-**Estimated time**: 2-3 minutes
-
-**Purpose**: Verify appsettings.json configuration is respected
-
-**Steps**:
-1. Close LiMount
-2. Edit `appsettings.json`:
-   ```json
-   {
-     "LiMount": {
-       "MountOperations": {
-         "UncAccessibilityRetries": 10,
-         "UncAccessibilityRetryDelayMs": 1000
-       }
-     }
-   }
-   ```
-3. Restart LiMount
-4. Mount a disk
-5. Observe that retry behavior has changed (longer delays visible)
-
-**Expected Results**:
-- ✅ Configuration changes are loaded on startup
-- ✅ Behavior reflects new configuration values
-- ✅ No errors from invalid configuration
-
-**Validation**:
-```powershell
-# Verify config file exists
-Test-Path ".\LiMount.WinUI\appsettings.json"
-
-# Verify config is valid JSON
-Get-Content ".\LiMount.WinUI\appsettings.json" | ConvertFrom-Json
-```
-
----
-
-## Manual Testing Checklist
-
-Before each release, manually test these critical paths:
+## Manual Release Checklist
 
 ### Happy Path
 
-- [ ] Application launches without errors
-- [ ] Disk enumeration shows Linux partitions
-- [ ] Mount operation completes successfully
-- [ ] Drive appears in Explorer
-- [ ] Files are accessible (read/write test)
-- [ ] Unmount operation completes successfully
-- [ ] Drive disappears from Explorer
-- [ ] History shows mount/unmount entries
+- [ ] App launches without errors
+- [ ] Default mount works in `NetworkLocation` mode
+- [ ] Legacy mount works in `DriveLetterLegacy` mode
+- [ ] Mount/unmount works in `None` mode
+- [ ] History entries include mode metadata
+- [ ] State restore reflects mounted mode correctly
 
-### Error Paths
+### Error Path
 
-- [ ] Mount with no disk selected (validation error)
-- [ ] Mount with WSL not running (environment error)
-- [ ] Mount to already-used drive letter (conflict detected)
-- [ ] Unmount non-existent mount (graceful error)
-- [ ] Invalid configuration (app shows error, doesn't crash)
+- [ ] No disk selected -> blocked or clear validation
+- [ ] WSL not running -> actionable error
+- [ ] Legacy mount with used drive letter -> conflict handled
+- [ ] Legacy mount without drive letter -> validation error
+- [ ] Unmount missing mount -> graceful handling
 
-### Edge Cases
+### UI and Screenshot Validation
 
-- [ ] Multiple concurrent mounts (all work independently)
-- [ ] Application restart with active mount (state restored)
-- [ ] Disk disconnected while mounted (error handled gracefully)
-- [ ] PowerShell execution policy prevents scripts (clear error message)
-
-### Performance
-
-- [ ] Disk enumeration completes within 2 seconds
-- [ ] Mount operation completes within 10 seconds (typical case)
-- [ ] UI remains responsive during long operations
-- [ ] Progress messages update smoothly
-
-### UI/UX
-
-- [ ] All buttons have correct enabled/disabled state
-- [ ] Progress messages are clear and informative
-- [ ] Error messages are actionable
-- [ ] Tooltips explain purpose of each control
-- [ ] Window can be resized, controls adjust properly
+- [ ] `ScreenshotBatchUiTests` passes in test mode
+- [ ] Output exists under `screenshots\ui-batch\<timestamp>\`
+- [ ] All deterministic screenshot files are present and non-empty
+- [ ] Default main-page captures reflect hidden drive-letter picker
 
 ---
 
-## Automated Integration Tests (Future)
-
-While full integration testing currently requires manual testing on Windows, we can create automated integration tests using:
-
-### Option 1: Windows-Only CI/CD
-
-**Setup**: GitHub Actions with Windows runner
-
-```yaml
-name: Integration Tests
-
-on: [push, pull_request]
-
-jobs:
-  integration-test:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v3
-        with:
-          dotnet-version: 8.0.x
-      - name: Install WSL
-        run: |
-          wsl --install -d Ubuntu
-          wsl --set-default-version 2
-      - name: Run Integration Tests
-        run: dotnet test --filter "Category=Integration"
-```
-
-**Challenges**:
-- GitHub Actions runners don't support nested virtualization (WSL won't work)
-- Would need self-hosted Windows runner with WSL2
-- Difficult to create test disks without physical hardware
-
-### Option 2: PowerShell Pester Tests
-
-**Setup**: Create Pester tests for PowerShell scripts
-
-```powershell
-# scripts/Tests/Mount-LinuxDiskCore.Tests.ps1
-Describe "Mount-LinuxDiskCore" {
-    It "Should validate disk index parameter" {
-        { .\Mount-LinuxDiskCore.ps1 -DiskIndex -1 -Partition 1 -FsType "ext4" } | Should -Throw
-    }
-
-    It "Should output key=value format" {
-        # Test with mocked wsl command
-        Mock wsl { return "STATUS=OK" }
-        $result = .\Mount-LinuxDiskCore.ps1 -DiskIndex 1 -Partition 1 -FsType "ext4"
-        $result | Should -Contain "STATUS="
-    }
-}
-```
-
-**Run tests**:
-```powershell
-Invoke-Pester -Path .\scripts\Tests\
-```
-
-### Option 3: Approval Tests for Scripts
-
-**Concept**: Capture script output, commit it as "approved" baseline, detect changes
-
-```powershell
-# Run script, capture output
-$output = .\Mount-LinuxDiskCore.ps1 -DiskIndex 1 -Partition 1 -FsType "ext4" 2>&1
-
-# Compare to approved baseline
-$approved = Get-Content ".\approved\Mount-LinuxDiskCore.approved.txt"
-if ($output -ne $approved) {
-    throw "Output changed from approved baseline"
-}
-```
-
----
-
-## Integration Test Gaps (Known Limitations)
-
-Due to Windows-specific dependencies, these scenarios are NOT covered by automated tests:
+## Integration Gaps and Constraints
 
 | Scenario | Reason | Mitigation |
 |----------|--------|------------|
-| WMI disk enumeration | Requires Windows WMI | Manual testing on Windows |
-| PowerShell elevation (UAC) | Fully unattended UAC automation is still limited | Use HIL runner defaults for elevated path, or `-SkipScriptElevation` only in controlled environments |
-| WSL mount/unmount | Requires actual WSL2 | Manual testing with WSL |
-| Drive letter mapping | Windows-specific API | Manual testing on Windows |
-| UNC path accessibility | Requires WSL running | Manual testing with WSL |
-| WinUI 3 UI interactions | Requires Windows + UI automation | Manual UI testing |
-
-**Best Practice**: Maximize unit test coverage (85%+) to catch logic errors, rely on manual integration tests for Windows-specific operations.
+| WMI disk enumeration | Windows-only API | Run HIL/manual tests on Windows |
+| UAC elevation path | Full unattended UAC automation is limited | Use HIL runner defaults |
+| WSL mount/unmount | Requires local WSL2 + compatible disk | HIL/manual validation |
+| NetHood behavior timing | Explorer refresh timing can vary | Validate with retries and manual Explorer checks |
+| WinUI interaction fidelity | Requires UI automation on Windows desktop session | FlaUI deterministic tests + manual pass |
 
 ---
 
-## Test Data Setup
-
-### Creating a Test Disk with Linux Partition
-
-#### Option 1: Virtual Disk (VHD)
+## Recommended Verification Commands
 
 ```powershell
-# Create VHD
-$vhdPath = "C:\Temp\test-linux-disk.vhdx"
-New-VHD -Path $vhdPath -SizeBytes 1GB -Dynamic
-
-# Mount VHD
-Mount-VHD -Path $vhdPath
-
-# Get disk number
-$disk = Get-VHD -Path $vhdPath
-$diskNumber = $disk.Number
-
-# Initialize disk (GPT)
-Initialize-Disk -Number $diskNumber -PartitionStyle GPT
-
-# Create partition (will be detected as Linux partition when formatted in WSL)
-# Don't format in Windows - format in WSL with ext4
-
-# In WSL:
-wsl -e sudo mkfs.ext4 /dev/sdX1  # Replace X with appropriate letter
-```
-
-#### Option 2: USB Drive
-
-1. Insert USB drive
-2. Format in Linux/WSL with ext4:
-   ```bash
-   sudo mkfs.ext4 /dev/sdX1
-   ```
-3. Use for testing
-
-#### Option 3: Docker Desktop with WSL2 Backend
-
-Docker Desktop is not a workaround for unsupported WSL filesystem features because it typically uses the same WSL kernel path.
-For filesystem-compatibility fallback testing, prefer a full Linux VM.
-
----
-
-## Reporting Integration Test Results
-
-After manual testing, document results:
-
-```markdown
-## Integration Test Run - 2025-11-18
-
-**Environment**:
-- OS: Windows 11 Pro (Build 22621)
-- WSL Version: 2.0.14.0
-- Distro: Ubuntu 22.04 LTS
-- .NET Version: 8.0.100
-
-**Test Results**:
-
-| Scenario | Status | Notes |
-|----------|--------|-------|
-| Basic Mount and Map | ✅ Pass | Completed in 4.2s |
-| Mount State Persistence | ✅ Pass | State restored correctly |
-| Mount History Tracking | ✅ Pass | Both operations logged |
-| Invalid Disk Selection | ✅ Pass | Validation prevented mount |
-| WSL Not Running | ⚠️ Warn | Error message could be clearer |
-| Drive Letter Conflict | ✅ Pass | Conflict detected |
-| Concurrent Mounts | ✅ Pass | Both disks mounted |
-| PowerShell Scripts | ✅ Pass | All scripts executed correctly |
-| Logging | ✅ Pass | Logs created and rotated |
-| Configuration | ✅ Pass | Settings respected |
-
-**Issues Found**:
-- WSL error message could provide better guidance on how to start WSL
-- Suggested: Add "Click here to start WSL" button in error dialog
-
-**Test Coverage**: 10/10 scenarios passed, 1 improvement suggested
+dotnet build --nologo
+dotnet test LiMount.Tests --nologo
+dotnet test LiMount.Tests --nologo --filter FullyQualifiedName~MountOrchestratorTests
+dotnet test LiMount.Tests --nologo --filter FullyQualifiedName~UnmountOrchestratorTests
+dotnet test LiMount.Tests --nologo --filter FullyQualifiedName~MainViewModelTests
+$env:LIMOUNT_RUN_UI_TESTS='1'; dotnet test LiMount.UITests --nologo; Remove-Item Env:\LIMOUNT_RUN_UI_TESTS
+$env:LIMOUNT_RUN_UI_TESTS='1'; $env:LIMOUNT_CAPTURE_SCREENSHOT_BATCH='1'; dotnet test LiMount.UITests --nologo --filter FullyQualifiedName~ScreenshotBatchUiTests; Remove-Item Env:\LIMOUNT_RUN_UI_TESTS; Remove-Item Env:\LIMOUNT_CAPTURE_SCREENSHOT_BATCH
 ```
 
 ---
 
-## Continuous Improvement
-
-As the project matures, consider:
-
-1. **Self-Hosted Windows Runner**: For automated integration tests
-2. **Docker-based Testing**: Use Docker Desktop + WSL2 for reproducible environment
-3. **Pester Test Suite**: PowerShell script testing
-4. **UI Automation**: Expand FlaUI coverage for WinUI 3 flows (including recovery/error UX)
-5. **Performance Benchmarks**: Track mount/unmount operation times
-6. **Compatibility Matrix**: Test on Windows 10 vs. 11, different WSL versions
-
----
-
-**Last Updated**: 2026-02-11
-**Maintained By**: Development Team
+**Last Updated**: 2026-02-13  
+**Maintained By**: Development Team  
 **Review Cycle**: Before each release

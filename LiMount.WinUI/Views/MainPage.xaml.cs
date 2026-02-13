@@ -93,6 +93,7 @@ public sealed partial class MainPage : Page
             var setupResult = await _setupWizardService.EnsureSetupAsync(forceWizard, cancellationToken);
             if (setupResult.IsCompleted)
             {
+                _viewModel.SetAccessMode(setupResult.Settings.AccessMode);
                 return true;
             }
 

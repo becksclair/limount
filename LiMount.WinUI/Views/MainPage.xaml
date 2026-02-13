@@ -26,7 +26,7 @@
                        Foreground="{StaticResource TextPrimaryBrush}"
                        Margin="0,0,0,8"
                        AutomationProperties.HeadingLevel="Level1"/>
-            <TextBlock Text="Mount Linux disk partitions into WSL2 and map them as Windows drive letters"
+            <TextBlock Text="Mount Linux disk partitions into WSL2 and expose them in Windows"
                        FontSize="13"
                        Foreground="{StaticResource TextSecondaryBrush}"
                        TextWrapping="Wrap"/>
@@ -87,13 +87,15 @@
                                FontWeight="SemiBold"
                                Foreground="{StaticResource TextPrimaryBrush}"
                                Margin="0,0,0,8"
-                               x:Name="DriveLetterLabel"/>
+                               x:Name="DriveLetterLabel"
+                               Visibility="{Binding IsDriveLetterMode, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                     <ComboBox x:Name="DriveLetterComboBox"
                               Style="{StaticResource ModernComboBox}"
                               ItemsSource="{Binding FreeDriveLetters}"
                               SelectedItem="{Binding SelectedDriveLetter, Mode=TwoWay}"
                               Margin="0,0,0,20"
                               IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBooleanConverter}}"
+                              Visibility="{Binding IsDriveLetterMode, Converter={StaticResource BooleanToVisibilityConverter}}"
                               AutomationProperties.Name="Select Drive Letter"
                               automation:AutomationProperties.AutomationId="DriveLetterComboBox"
                               AutomationProperties.LabeledBy="{Binding ElementName=DriveLetterLabel}"
@@ -216,7 +218,7 @@
                     Command="{Binding MountCommand}"
                     MinWidth="120"
                     Margin="0,0,8,0"
-                    AutomationProperties.Name="Mount selected partition to drive letter"
+                    AutomationProperties.Name="Mount selected partition with configured access mode"
                     automation:AutomationProperties.AutomationId="MountButton"
                     TabIndex="7"/>
 

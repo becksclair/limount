@@ -119,6 +119,7 @@ public class MountHistoryEntryDisplay
     public int? PartitionNumber => _entry.PartitionNumber;
     public char? DriveLetter => _entry.DriveLetter;
     public string DriveLetterDisplay => DriveLetter.HasValue ? $"{DriveLetter}:" : "-";
+    public WindowsAccessMode AccessMode => _entry.AccessMode;
     public string? DistroName => _entry.DistroName;
 
     public string DetailsDisplay
@@ -133,7 +134,13 @@ public class MountHistoryEntryDisplay
 
             if (OperationType == "Mount" && !string.IsNullOrEmpty(_entry.MountPathUNC))
             {
-                return $"UNC: {_entry.MountPathUNC}";
+                var modeDetails = _entry.AccessMode switch
+                {
+                    WindowsAccessMode.DriveLetterLegacy => $"Drive: {DriveLetterDisplay}",
+                    WindowsAccessMode.NetworkLocation => $"Network Location: {_entry.NetworkLocationName}",
+                    _ => "Access: None"
+                };
+                return $"UNC: {_entry.MountPathUNC} ({modeDetails})";
             }
 
             if (Success)
